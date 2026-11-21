@@ -9,10 +9,14 @@
 # En SonarCloud hay que desactivar el "Automatic Analysis" (choca con el
 # análisis desde la CI).
 #
-# El plan gratuito de SonarCloud solo analiza la rama principal del proyecto
-# (allí se llama "main"). Por eso el análisis de trunk se guarda en esa rama
-# principal: lo que se ve en SonarCloud como "main" es el estado de trunk. Es
-# lo que interesa medir, porque main solo recibe lo que ya estaba en trunk.
+# Solo se analiza trunk: main solo recibe commits de trunk (merge --ff-only),
+# que ya se han analizado aquí.
+#
+# El plan gratuito de SonarCloud analiza otras ramas, pero no deja ver sus
+# resultados ("not allowed to access data from non main branches"). Por eso el
+# análisis de trunk se guarda en la rama principal del proyecto en SonarCloud,
+# que se llama "main" (SONAR_MAIN_BRANCH): lo que se ve allí es el estado de
+# trunk. Si algún día se renombra en SonarCloud, hay que cambiarlo aquí.
 # ----------------------------------------------------------------------------
 
 name: SonarCloud
@@ -33,6 +37,9 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      # Nombre de la rama principal del proyecto en SonarCloud.
+      SONAR_MAIN_BRANCH: main
 
     steps:
       - name: Comprobar el token
@@ -64,12 +71,9 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Sin sonar.branch.name: en un workflow_run, GITHUB_REF es la rama por
-      # defecto (main), así que el escáner detecta "main", que es la rama principal
-      # de SonarCloud y la única que permite el plan gratuito. Pasar
-      # -Dsonar.branch.name=trunk crearía una rama secundaria que no se puede ver.
-      # scm.revision sí se indica, para que el análisis quede asociado al commit de
-      # trunk que ha pasado las pruebas.
+      # La rama se indica a mano: sin ella, el escáner la deduce de GITHUB_REF, que
+      # en un workflow_run es la rama por defecto del repositorio (trunk), y el
+      # resultado acabaría en una rama de SonarCloud que no se puede ver.
       - name: Analizar con SonarCloud
         if: ${{ steps.token.outputs.present == 'true' }}
         uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
@@ -77,4 +81,5 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
+            -Dsonar.branch.name=${{ env.SONAR_MAIN_BRANCH }}
             -Dsonar.scm.revision=${{ github.event.workflow_run.head_sha }}
