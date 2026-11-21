@@ -1,0 +1,39 @@
+# ----------------------------------------------------------------------------
+# Composite action: levanta la aplicación en el runner para las pruebas que
+# necesitan un servidor de verdad (Selenium y Locust).
+#
+# Hace lo mismo que docker/entrypoints/development_entrypoint.sh: aplica las
+# migraciones, siembra la base de datos (las pruebas usan user1@example.com) y
+# arranca Flask en segundo plano en http://localhost:5000. El proceso sigue vivo
+# en los pasos siguientes del job; la salida queda en flask.log.
+#
+# Requisitos: action setup-python ejecutada antes y las variables MARIADB_* y
+# FLASK_ENV definidas en el job, con un servicio MariaDB accesible.
+# ----------------------------------------------------------------------------
+
+name: Arrancar la aplicación
+description: Migra y siembra la base de datos y arranca Flask en localhost:5000.
+
+runs:
+  using: composite
+  steps:
+    - name: Migrar y sembrar la base de datos
+      shell: bash
+      run: |
+        flask db upgrade
+        rosemary db:seed -y
+
+    - name: Arrancar Flask en segundo plano
+      shell: bash
+      run: |
+        nohup flask run --host 0.0.0.0 --port 5000 > flask.log 2>&1 &
+        for _ in $(seq 1 60); do
+          if curl -sf -o /dev/null http://localhost:5000/; then
+            echo "La aplicación responde en http://localhost:5000"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "::error::La aplicación no ha arrancado en 2 minutos"
+        cat flask.log
+        exit 1

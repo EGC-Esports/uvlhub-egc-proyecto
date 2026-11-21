@@ -1,0 +1,68 @@
+# ----------------------------------------------------------------------------
+# Despliegue en producción
+# EGCFlow: "tener despliegues automáticos tanto en trunk como en main". main
+# solo avanza en las releases (git merge --ff-only trunk), así que cada push a
+# main es una entrega y se despliega sola, sin esperar a nadie.
+#
+# Antes de desplegar pasan las pruebas (tests.yml) y las de carga (locust.yml)
+# sobre el mismo commit. Si alguna falla, no se despliega. El tag vX.Y.Z que
+# acompaña al push lo recoge release.yml, que publica la imagen y la Release.
+#
+# Secretos y variables (Settings → Secrets and variables → Actions, o en el
+# environment "production"):
+#   * RENDER_DEPLOY_HOOK_PROD (secreto): Deploy Hook del servicio de Render que
+#     sigue la rama main. Sin él, el job avisa y no despliega.
+#   * PROD_URL (variable, opcional): URL pública, se enlaza desde el run.
+# En Render conviene desactivar el Auto-Deploy, para que solo despliegue la CI.
+# ----------------------------------------------------------------------------
+
+name: Despliegue en producción
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Pruebas
+    uses: ./.github/workflows/tests.yml
+
+  load:
+    name: Pruebas de carga
+    uses: ./.github/workflows/locust.yml
+    with:
+      users: '20'
+      spawn_rate: '5'
+      run_time: '1m'
+
+  deploy:
+    name: Desplegar main en producción
+    needs: [tests, load]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Los despliegues van de uno en uno y no se cancelan a medias.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: ${{ vars.PROD_URL }}
+
+    steps:
+      - name: Lanzar el despliegue en Render
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PROD }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::warning::Falta el secreto RENDER_DEPLOY_HOOK_PROD: no se ha desplegado nada."
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_HOOK" -o /dev/null
+          {
+            echo "### Despliegue en producción lanzado"
+            echo
+            echo "Commit: \`${GITHUB_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

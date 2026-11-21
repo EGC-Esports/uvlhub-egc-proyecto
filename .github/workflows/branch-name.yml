@@ -1,0 +1,78 @@
+# ----------------------------------------------------------------------------
+# Ramas
+# EGCFlow: ramas por tarea de feature (no por persona), cortas y que se
+# integran con frecuencia. Dos comprobaciones:
+#
+#   * Nombre: main, trunk o tipo/N-descripcion (acta fundacional §7.1), p. ej.
+#     feat/12-fakenodo. Si no cumple, el workflow falla.
+#   * Al día con trunk: avisa (sin fallar) si la rama de tarea lleva más de
+#     MAX_DAYS días sin traerse lo que se ha integrado en trunk. La metodología
+#     pide git merge trunk al menos cada dos días de trabajo; cuanto más tarde
+#     se hace, más conflictos hay al integrar.
+# ----------------------------------------------------------------------------
+
+name: Ramas
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  branch-name:
+    name: Nombre de la rama
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validar el nombre de la rama
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: python3 scripts/ci/check_branch_name.py "$BRANCH"
+
+  up-to-date:
+    name: Rama al día con trunk
+    if: ${{ github.ref_name != 'main' && github.ref_name != 'trunk' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Se cuentan las integraciones de trunk (su historia de primer padre: un
+      # merge por tarea), con la fecha en que entraron en trunk. Los commits de
+      # dentro de cada tarea pueden ser más antiguos y darían un aviso falso.
+      - name: Comprobar si faltan integraciones de trunk
+        env:
+          MAX_DAYS: 2
+        run: |
+          missing=$(git rev-list --count --first-parent HEAD..origin/trunk)
+          if [ "$missing" -eq 0 ]; then
+            echo "La rama tiene todo lo integrado en trunk."
+            exit 0
+          fi
+          oldest=$(git log --first-parent --format=%ct HEAD..origin/trunk | sort -n | head -1)
+          days=$(( ( $(date +%s) - oldest ) / 86400 ))
+          msg="A esta rama le faltan $missing integraciones de trunk; la más antigua entró hace $days días."
+          if [ "$days" -ge "$MAX_DAYS" ]; then
+            echo "::warning title=Rama desactualizada::$msg Actualízala con git merge trunk (después de git pull en trunk)."
+            {
+              echo "### Rama desactualizada"
+              echo
+              echo "$msg"
+              echo
+              echo '```'
+              echo 'git switch trunk && git pull && git switch - && git merge trunk'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "$msg Aún dentro del margen de $MAX_DAYS días."
+          fi

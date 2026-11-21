@@ -1,0 +1,51 @@
+# ----------------------------------------------------------------------------
+# Commits
+# Comprueba que cada commit nuevo sigue Conventional Commits con la issue al
+# final: tipo(ámbito): descripción (#N)  (acta fundacional §7.5).
+#
+# Es la misma comprobación que el hook commit-msg, que se puede saltar con
+# --no-verify; aquí es donde se decide.
+#
+# Solo mira los commits que trae el push, no toda la historia: la heredada del
+# fork de UVLHub no lleva número de issue.
+# ----------------------------------------------------------------------------
+
+name: Commits
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    name: Formato de los commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      # Historia completa: hacen falta el commit anterior al push y las demás ramas.
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Comprobar los mensajes de los commits nuevos
+        env:
+          BEFORE: ${{ github.event.before }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            # Rama nueva (o push forzado que borró el commit anterior): se comprueban
+            # los commits que no están en ninguna otra rama del remoto.
+            echo "Rama nueva: se comprueban los commits que no están en otras ramas."
+            mapfile -t exclude < <(
+              git for-each-ref --format='^%(refname)' refs/remotes/origin \
+                | grep -v -F -x -e "^refs/remotes/origin/${BRANCH}" -e "^refs/remotes/origin/HEAD"
+            )
+            python3 scripts/ci/check_commit_msg.py --git HEAD "${exclude[@]}"
+          else
+            python3 scripts/ci/check_commit_msg.py --git "${BEFORE}..HEAD"
+          fi

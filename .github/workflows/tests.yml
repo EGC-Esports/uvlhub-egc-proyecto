@@ -1,0 +1,109 @@
+# ----------------------------------------------------------------------------
+# Tests
+# pytest con MariaDB como servicio y cobertura con un mínimo. Corre las capas
+# rápidas de la pirámide (unit, repository, service, integration y las que no
+# llevan marca). Selenium (e2e) y Locust (load) tienen sus propios workflows.
+#
+# Se ejecuta en cada push a trunk y a las ramas de tarea. En main no se lanza
+# sola: deploy-prod.yml la llama antes de desplegar, para no repetirla.
+# Cuando termina bien en trunk, la recogen deploy-preprod.yml y sonar.yml
+# (workflow_run), así que el nombre "Tests" no se puede cambiar sin cambiarlo
+# también allí.
+#
+# El informe de cobertura queda como artefacto "coverage-report" del run.
+# ----------------------------------------------------------------------------
+
+name: Tests
+
+on:
+  push:
+    branches: ['**', '!main']
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# En una rama de tarea, un push nuevo cancela el run anterior. En trunk y main
+# no, porque de este run depende el despliegue.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' && github.ref != 'refs/heads/main' }}
+
+jobs:
+  pytest:
+    name: Pytest y cobertura
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      # Cobertura mínima en %. Si baja de aquí, el workflow falla (DEC-004).
+      # Subirla a medida que crezca la cobertura real, nunca bajarla.
+      COVERAGE_MIN: 60
+      MARIADB_ROOT_PASSWORD: uvlhub_root_password
+      MARIADB_DATABASE: uvlhubdb_test
+      MARIADB_TEST_DATABASE: uvlhubdb_test
+      MARIADB_USER: uvlhub_user
+      MARIADB_PASSWORD: uvlhub_password
+      MARIADB_HOSTNAME: 127.0.0.1
+      MARIADB_PORT: 3306
+      FLASK_ENV: testing
+
+    services:
+      mariadb:
+        image: mariadb:12.0.2
+        env:
+          MARIADB_ROOT_PASSWORD: ${{ env.MARIADB_ROOT_PASSWORD }}
+          MARIADB_DATABASE: ${{ env.MARIADB_DATABASE }}
+          MARIADB_USER: ${{ env.MARIADB_USER }}
+          MARIADB_PASSWORD: ${{ env.MARIADB_PASSWORD }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -u root -p$MARIADB_ROOT_PASSWORD"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Preparar Python
+        uses: ./.github/actions/setup-python
+
+      # Sin ruta: pytest recorre los testpaths de pyproject.toml (app/features y tests).
+      # --cov sin valor toma source y omit de [tool.coverage.run] en pyproject.toml.
+      - name: Ejecutar las pruebas con cobertura
+        run: >-
+          pytest -m "not e2e and not load"
+          --cov
+          --cov-report=term-missing:skip-covered
+          --cov-report=xml
+          --cov-report=html
+          --cov-fail-under="$COVERAGE_MIN"
+          --junitxml=pytest-report.xml
+
+      - name: Resumen de cobertura
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .coverage ]; then
+            total=$(coverage report --format=total)
+            {
+              echo "### Cobertura: ${total}% (mínimo ${COVERAGE_MIN}%)"
+              echo
+              echo "El informe HTML está en el artefacto **coverage-report** (htmlcov/index.html)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Subir el informe de cobertura
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+            pytest-report.xml
+          if-no-files-found: ignore
+          retention-days: 30

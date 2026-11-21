@@ -1,0 +1,120 @@
+# ----------------------------------------------------------------------------
+# Release
+# EGCFlow: main es la rama de releases y las entregas se etiquetan con tags.
+# Se lanza al subir un tag vX.Y.Z junto con main:
+#
+#   git switch main && git pull && git merge --ff-only trunk
+#   git tag -a v0.1.0 -m "v0.1.0" && git push origin main --tags
+#
+# El despliegue en producción NO está aquí: lo hace deploy-prod.yml con el push
+# a main. Este workflow publica la entrega:
+#   1. Comprueba que el tag tiene formato vX.Y.Z y apunta a un commit de main.
+#      Lo que llega a main ya ha pasado las pruebas (ruleset con status checks).
+#   2. Construye la imagen Docker de producción y la sube a Docker Hub.
+#   3. Crea la GitHub Release con notas generadas a partir de los commits.
+#
+# Sustituye a CD_dockerhub.yml: una release creada con el GITHUB_TOKEN no
+# dispara otros workflows, así que la imagen se construye aquí.
+#
+# Secretos: DOCKER_USER y DOCKER_PASSWORD. Sin ellos la imagen se construye
+# pero no se sube.
+# ----------------------------------------------------------------------------
+
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify-tag:
+    name: Comprobar el tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: El tag tiene formato vX.Y.Z y está en main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::El tag «$TAG» no tiene el formato vX.Y.Z"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::El tag «$TAG» apunta a un commit que no está en main"
+            exit 1
+          fi
+          echo "Tag $TAG correcto, en main."
+
+  docker-image:
+    name: Imagen Docker
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TAG: ${{ github.ref_name }}
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Construir la imagen de producción
+        run: |
+          IMAGE="${DOCKER_USER:-uvlhub}/uvlhub"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          docker build --build-arg VERSION_TAG="$TAG" -t "$IMAGE:$TAG" -t "$IMAGE:latest" \
+            -f docker/images/Dockerfile.prod .
+
+      - name: Iniciar sesión en Docker Hub
+        if: ${{ env.DOCKER_USER != '' && env.DOCKER_PASSWORD != '' }}
+        uses: docker/login-action@v3.6.0
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ env.DOCKER_PASSWORD }}
+
+      - name: Subir la imagen a Docker Hub
+        run: |
+          if [ -z "$DOCKER_USER" ] || [ -z "$DOCKER_PASSWORD" ]; then
+            echo "::warning::Faltan DOCKER_USER o DOCKER_PASSWORD: la imagen se ha construido pero no se ha subido."
+            exit 0
+          fi
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+          echo "### Imagen publicada: \`$IMAGE:$TAG\`" >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    name: GitHub Release
+    needs: docker-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Generar las notas a partir de los commits
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python3 scripts/ci/release_notes.py "$TAG" > release-notes.md
+
+      - name: Crear la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --title "$TAG" --notes-file release-notes.md --verify-tag

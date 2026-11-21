@@ -1,0 +1,72 @@
+# ----------------------------------------------------------------------------
+# SonarCloud
+# Análisis de calidad de trunk. Corre cuando "Tests" termina bien tras un push
+# a trunk y reutiliza la cobertura de ese run (artefacto coverage-report), así
+# las pruebas no se ejecutan dos veces.
+#
+# Configuración del proyecto: sonar-project.properties.
+# Necesita el secreto SONAR_TOKEN. Sin él, el job avisa y no analiza nada.
+# En SonarCloud hay que desactivar el "Automatic Analysis" (choca con el
+# análisis desde la CI) y poner trunk como rama principal.
+# ----------------------------------------------------------------------------
+
+name: SonarCloud
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [trunk]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sonar:
+    name: Análisis de calidad
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Comprobar el token
+        id: token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::warning::Falta el secreto SONAR_TOKEN: no se analiza nada."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # El commit que ha pasado las pruebas, no el último de la rama. Historia
+      # completa para que Sonar pueda atribuir cada línea nueva.
+      - name: Checkout
+        if: ${{ steps.token.outputs.present == 'true' }}
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Descargar la cobertura del run de Tests
+        if: ${{ steps.token.outputs.present == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # En un workflow_run, GITHUB_REF apunta a la rama por defecto y no a la que
+      # ha lanzado las pruebas, así que la rama se indica a mano.
+      - name: Analizar con SonarCloud
+        if: ${{ steps.token.outputs.present == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.branch.name=${{ github.event.workflow_run.head_branch }}
+            -Dsonar.scm.revision=${{ github.event.workflow_run.head_sha }}

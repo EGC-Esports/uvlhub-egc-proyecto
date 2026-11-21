@@ -1,0 +1,27 @@
+# ----------------------------------------------------------------------------
+# Composite action: prepara Python 3.13 con las dependencias del proyecto.
+# La comparten tests.yml, selenium.yml y locust.yml para que todos instalen
+# exactamente lo mismo. Necesita que el repositorio esté ya descargado.
+# ----------------------------------------------------------------------------
+
+name: Preparar Python
+description: Instala Python 3.13 (splent_framework lo exige), requirements.txt y rosemary.
+
+runs:
+  using: composite
+  steps:
+    - name: Instalar Python 3.13
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+        cache: pip
+        cache-dependency-path: |
+          requirements.txt
+          rosemary/pyproject.toml
+
+    - name: Instalar dependencias
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e ./rosemary

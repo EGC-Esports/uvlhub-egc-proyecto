@@ -1,0 +1,49 @@
+# ----------------------------------------------------------------------------
+# Lint
+# flake8, black e isort sobre todo el código Python. La configuración de las
+# tres está en pyproject.toml y las versiones, fijadas en requirements-lint.txt,
+# son las mismas que usa el hook pre-commit.
+# ----------------------------------------------------------------------------
+
+name: Lint
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+env:
+  LINT_PATHS: app rosemary scripts tests
+
+jobs:
+  lint:
+    name: Lint y formato
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Instalar Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-lint.txt
+
+      - name: Instalar las herramientas de lint
+        run: pip install -r requirements-lint.txt
+
+      - name: flake8
+        run: flake8 $LINT_PATHS
+
+      - name: black
+        if: ${{ !cancelled() }}
+        run: black --check --diff $LINT_PATHS
+
+      - name: isort
+        if: ${{ !cancelled() }}
+        run: isort --check-only --diff $LINT_PATHS
