@@ -1,0 +1,130 @@
+# ----------------------------------------------------------------------------
+# Hooks locales de git (framework pre-commit, https://pre-commit.com)
+#
+# Instalación, una sola vez por persona y en el ordenador (no en el contenedor):
+#
+#   pip install pre-commit
+#   pre-commit install
+#
+# default_install_hook_types hace que ese "pre-commit install" instale los tres
+# hooks: pre-commit, commit-msg y pre-push.
+#
+# Qué comprueba cada uno:
+#   pre-commit  lint y formato (flake8, black, isort), espacios al final de
+#               línea, ficheros grandes, YAML válido, conflictos sin resolver,
+#               claves privadas y ficheros .env
+#   commit-msg  formato tipo(ámbito): descripción (#N)
+#   pre-push    nombre de la rama y que nadie empuje directamente a main
+#
+# Los hooks avisan antes del push; quien decide es la CI, que repite las mismas
+# comprobaciones (un hook se puede saltar con --no-verify). Por eso:
+#   * flake8, black e isort usan aquí las MISMAS versiones que
+#     requirements-lint.txt, que es lo que instala .github/workflows/lint.yml.
+#     tests/test_ci_scripts.py falla si se desincronizan.
+#   * commit-msg y pre-push llaman a los mismos scripts de scripts/ci que los
+#     workflows commits.yml y branch-name.yml.
+#
+# Otros comandos útiles:
+#   pre-commit run --files <ficheros>               pasar los hooks a unos ficheros
+#   pre-commit run unit-tests --hook-stage manual   pruebas unitarias rápidas
+#   (Evitar "pre-commit run --all-files": los fixers de espacios reescribirían
+#   unos 50 ficheros heredados de UVLHub que nadie ha tocado.)
+#   pre-commit autoupdate                           NO usarlo sin actualizar
+#                                                   también requirements-lint.txt
+# ----------------------------------------------------------------------------
+
+minimum_pre_commit_version: "3.2.0"
+
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+# Salvo que un hook diga otra cosa, solo se ejecuta al hacer commit.
+default_stages: [pre-commit]
+
+# Librerías empaquetadas: no son código nuestro y no se tocan.
+exclude: ^app/static/(js/app\.js|css/app\.css|css/dropzone\.css|.*\.map)$
+
+repos:
+  # --- Higiene general -------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Los dos que modifican ficheros declaran también pre-push en su repositorio;
+      # se dejan solo en el commit para que un push no cambie ficheros.
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # --- Lint y formato: mismas versiones que requirements-lint.txt -------------
+  # files: las mismas carpetas que revisa lint.yml (LINT_PATHS), para que el
+  # hook no reformatee lo que la CI no mira, como migrations/.
+  # stages: se fija a mano porque isort declara también pre-push en su propio
+  # repositorio, y default_stages no se aplica a los hooks que declaran stages.
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.5.0
+    hooks:
+      - id: flake8
+        # Sin este plugin flake8 no lee su configuración de pyproject.toml.
+        additional_dependencies: [flake8-pyproject==1.2.4]
+        files: ^(app|rosemary|scripts|tests)/
+        stages: [pre-commit]
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.10.1
+    hooks:
+      - id: black
+        files: ^(app|rosemary|scripts|tests)/
+        stages: [pre-commit]
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 9.0.2
+    hooks:
+      - id: isort
+        files: ^(app|rosemary|scripts|tests)/
+        stages: [pre-commit]
+
+  # --- Reglas del equipo -------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: forbid-env-files
+        name: no subir ficheros .env (credenciales fuera del repositorio)
+        language: fail
+        entry: >-
+          Los ficheros .env llevan credenciales y no se suben al repositorio.
+          Si es una plantilla sin valores reales, llámala .env.example o .env.<algo>.example.
+        files: (^|/)\.env(\..+)?$
+        # Plantillas sin valores reales (.env.example, .env.docker.example...) y la
+        # configuración de Selenium.
+        exclude: (^|/)\.env\.((.+\.)?example|selenium)$
+
+      - id: commit-msg-format
+        name: formato del mensaje de commit
+        language: python
+        entry: python scripts/ci/check_commit_msg.py
+        stages: [commit-msg]
+
+      - id: branch-name
+        name: nombre de la rama y push a main
+        language: python
+        entry: python scripts/ci/check_branch_name.py --pre-push
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+
+      # Opcional: no corre sola porque necesita las dependencias del proyecto
+      # instaladas en el ordenador. Se lanza con:
+      #   pre-commit run unit-tests --hook-stage manual
+      - id: unit-tests
+        name: pruebas unitarias
+        language: system
+        entry: python -m pytest -m unit -q
+        stages: [manual]
+        always_run: true
+        pass_filenames: false
