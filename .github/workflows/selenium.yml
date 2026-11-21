@@ -111,13 +111,46 @@ jobs:
           docker logs selenium
           exit 1
 
+      # Las páginas cargan Bootstrap, Dropzone y las fuentes desde CDNs externos
+      # (jsdelivr, unpkg, Google Fonts), y Chrome no da una página por cargada
+      # hasta que llegan. Si un CDN tarda más de 30 s una vez, la prueba que esté
+      # cargando falla aunque la app esté bien. Por eso las pruebas que fallan se
+      # repiten una vez (--lf, de pytest): un fallo real vuelve a fallar y deja la
+      # CI en rojo; uno de red pasa y queda anotado como aviso.
       - name: Ejecutar las pruebas de interfaz
         run: |
           target=()
           if [ -n "$FEATURE" ]; then
             target=("app/features/$FEATURE/tests/test_selenium.py")
           fi
+
+          set +e
           pytest -v -m e2e --junitxml=selenium-report.xml "${target[@]}"
+          status=$?
+          set -e
+          # 0 = todo bien; distinto de 1 = no son fallos de pruebas (configuración,
+          # interrupción, ninguna prueba encontrada): no tiene sentido repetir.
+          if [ "$status" -ne 1 ]; then
+            exit "$status"
+          fi
+
+          echo "::group::Repetición de las pruebas que han fallado"
+          set +e
+          pytest -v -m e2e --lf --junitxml=selenium-rerun.xml "${target[@]}"
+          rerun=$?
+          set -e
+          echo "::endgroup::"
+
+          if [ "$rerun" -eq 0 ]; then
+            msg="Alguna prueba de interfaz falló y pasó al repetirla: probablemente un CDN tardó en responder. Si se repite con la misma prueba, revísala."
+            echo "::warning title=Prueba inestable::$msg"
+            {
+              echo "### Prueba inestable"
+              echo
+              echo "$msg Detalle en el artefacto selenium-report (selenium-report.xml y selenium-rerun.xml)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$rerun"
 
       - name: Guardar los logs si algo falla
         if: ${{ failure() }}
@@ -130,6 +163,7 @@ jobs:
           name: selenium-report-${{ env.SELENIUM_BROWSER }}
           path: |
             selenium-report.xml
+            selenium-rerun.xml
             flask.log
             selenium.log
           if-no-files-found: ignore
