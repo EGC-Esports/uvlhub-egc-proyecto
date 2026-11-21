@@ -17,14 +17,22 @@ description: Migra y siembra la base de datos y arranca Flask en localhost:5000.
 runs:
   using: composite
   steps:
+    # PYTHONPATH: rosemary es un script instalado fuera del repositorio y no ve el
+    # paquete app/ si no se le indica, igual que hacen las imágenes de Docker con
+    # ENV PYTHONPATH=/workspace. Sin esto, db:seed falla con
+    # "ModuleNotFoundError: No module named 'app'".
     - name: Migrar y sembrar la base de datos
       shell: bash
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         flask db upgrade
         rosemary db:seed -y
 
     - name: Arrancar Flask en segundo plano
       shell: bash
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         nohup flask run --host 0.0.0.0 --port 5000 > flask.log 2>&1 &
         for _ in $(seq 1 60); do

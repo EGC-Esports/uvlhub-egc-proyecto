@@ -46,14 +46,14 @@ jobs:
       # completa para que Sonar pueda atribuir cada línea nueva.
       - name: Checkout
         if: ${{ steps.token.outputs.present == 'true' }}
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Descargar la cobertura del run de Tests
         if: ${{ steps.token.outputs.present == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: coverage-report
           run-id: ${{ github.event.workflow_run.id }}
@@ -63,7 +63,7 @@ jobs:
       # ha lanzado las pruebas, así que la rama se indica a mano.
       - name: Analizar con SonarCloud
         if: ${{ steps.token.outputs.present == 'true' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

@@ -187,6 +187,27 @@ def test_release_notes_group_commits_by_type():
     assert "### Documentación" not in notes
 
 
+def test_release_notes_from_git_tags(tmp_path, monkeypatch, capsys):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "feat(auth): login (#1)")
+    _git(tmp_path, "tag", "-a", "v0.1.0", "-m", "v0.1.0")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "fix(auth): logout (#2)")
+    _git(tmp_path, "tag", "-a", "v0.2.0", "-m", "v0.2.0")
+    monkeypatch.chdir(tmp_path)
+
+    assert release_notes.main(["v0.2.0"]) == 0
+    notes = capsys.readouterr().out
+    assert "Cambios desde v0.1.0." in notes
+    assert "**auth:** logout (#2)" in notes
+    assert "login" not in notes
+
+    # No earlier tag, and this repository does not contain the UVLHub fork point.
+    assert release_notes.main(["v0.1.0"]) == 0
+    notes = capsys.readouterr().out
+    assert "Primera release del proyecto." in notes
+    assert "**auth:** login (#1)" in notes
+
+
 def test_release_notes_for_the_first_release():
     notes = release_notes.render("v0.1.0", release_notes.FORK_POINT, [])
     assert "Primera release del proyecto: cambios desde el fork de UVLHub." in notes
