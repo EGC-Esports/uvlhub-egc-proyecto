@@ -70,6 +70,8 @@ markers = [
 # Used by `pytest --cov` in .github/workflows/tests.yml. The tests themselves are
 # left out so they do not inflate the percentage, and paths are written relative
 # so SonarCloud can match coverage.xml against the checkout of another job.
-source = ["app"]
+# scripts/ is measured too: SonarCloud analyses it, and without coverage data its
+# lines would count as 0% covered new code in the quality gate.
+source = ["app", "scripts"]
 omit = ["app/features/*/tests/*"]
 relative_files = true
