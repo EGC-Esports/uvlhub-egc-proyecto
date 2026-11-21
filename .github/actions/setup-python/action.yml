@@ -2,10 +2,13 @@
 # Composite action: prepara Python 3.13 con las dependencias del proyecto.
 # La comparten tests.yml, selenium.yml y locust.yml para que todos instalen
 # exactamente lo mismo. Necesita que el repositorio esté ya descargado.
+#
+# rosemary no se instala: sus dependencias ya están en requirements.txt y se
+# ejecuta desde su código con "python -m rosemary" (ver la action start-app).
 # ----------------------------------------------------------------------------
 
 name: Preparar Python
-description: Instala Python 3.13 (splent_framework lo exige), requirements.txt y rosemary.
+description: Instala Python 3.13 (splent_framework lo exige) y requirements.txt.
 
 runs:
   using: composite
@@ -15,13 +18,12 @@ runs:
       with:
         python-version: '3.13'
         cache: pip
-        cache-dependency-path: |
-          requirements.txt
-          rosemary/pyproject.toml
+        cache-dependency-path: requirements.txt
 
+    # Sin --only-binary ni --require-hashes: cuatro dependencias de flamapy y de la
+    # app (astutils, flasgger, ply, python-sat) solo se publican como código
+    # fuente, y requirements.txt es también el que usan las imágenes de Docker.
+    # Las versiones están fijadas con ==. Revisado y aceptado en SonarCloud.
     - name: Instalar dependencias
       shell: bash
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install -e ./rosemary
+      run: pip install -r requirements.txt

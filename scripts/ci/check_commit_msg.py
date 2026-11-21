@@ -13,10 +13,15 @@ Dos modos de uso:
 
     python scripts/ci/check_commit_msg.py .git/COMMIT_EDITMSG
 
-* CI, sobre un conjunto de commits. Lo que va detrás de ``--git`` se pasa tal cual a
-  ``git log``, así que sirve cualquier rango::
+* CI, sobre un conjunto de commits. Lo que va detrás de ``--git`` son revisiones
+  para ``git log`` (un rango, ``HEAD``, ``^rama``…)::
 
     python scripts/ci/check_commit_msg.py --git -- origin/trunk..HEAD
+
+Seguridad: las revisiones solo pueden tener los caracteres de un nombre de rama o
+de un rango y nunca empezar por ``-``, y van detrás de ``--end-of-options``, así que
+git nunca las toma por opciones (``--output=fichero`` escribiría en disco). En modo
+hook solo se abre un fichero de dentro del directorio ``.git`` del repositorio.
 
 Sale con código 1 si algún mensaje no cumple el formato.
 """
@@ -26,12 +31,18 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 TYPES = ("feat", "fix", "docs", "test", "ci", "refactor", "chore", "build", "perf", "style", "revert")
 
 COMMIT_PATTERN = re.compile(r"^(" + "|".join(TYPES) + r")(\([a-z0-9-]+\))?!?: .+ \(#\d+\)$")
 
 IGNORED_PREFIXES = ("Merge ", "Revert ")
+
+# Una revisión de git: ref, sha, HEAD~1, ^refs/remotes/origin/trunk, A..B, A...B.
+# Empieza siempre por letra o número (tras un ^ opcional): nunca por "-".
+_REF = r"[A-Za-z0-9][A-Za-z0-9._/@{}~^-]*"
+REVISION_PATTERN = re.compile(rf"\^?{_REF}(\.\.\.?{_REF})?")
 
 EXAMPLES = (
     "feat(fakenodo): simular publicación de depósito (#12)",
@@ -56,10 +67,18 @@ def subject_from_message(message: str) -> str:
     return ""
 
 
-def commits_from_git(git_args: list[str]) -> list[tuple[str, str]]:
-    """Lista de (sha corto, asunto) de los commits que devuelve ``git log <git_args>``."""
+def safe_revisions(revisions: list[str]) -> list[str]:
+    """Las revisiones si todas tienen forma de revisión de git; si no, ValueError."""
+    for revision in revisions:
+        if not REVISION_PATTERN.fullmatch(revision):
+            raise ValueError(f"«{revision}» no es una revisión de git válida (rama, sha o rango A..B)")
+    return list(revisions)
+
+
+def commits_from_git(revisions: list[str]) -> list[tuple[str, str]]:
+    """Lista de (sha corto, asunto) de los commits que devuelve ``git log <revisions>``."""
     output = subprocess.run(
-        ["git", "log", "--format=%h%x1f%s", *git_args],
+        ["git", "log", "--format=%h%x1f%s", "--end-of-options", *safe_revisions(revisions)],
         check=True,
         capture_output=True,
         text=True,
@@ -88,12 +107,32 @@ def print_help_footer() -> None:
         print(f"  {example}")
 
 
+def git_dir() -> Path:
+    """Directorio de git del repositorio actual (en un worktree, el de ese worktree)."""
+    output = subprocess.run(
+        ["git", "rev-parse", "--absolute-git-dir"], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout
+    return Path(output.strip()).resolve()
+
+
+def message_file_inside_git_dir(path: str) -> Path:
+    """La ruta resuelta si está dentro del directorio de git (donde git deja COMMIT_EDITMSG); si no, ValueError."""
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(git_dir()):
+        raise ValueError(f"«{path}» no está dentro del directorio .git del repositorio")
+    return resolved
+
+
 def check_commits(git_args: list[str]) -> int:
     """Modo CI: comprueba todos los commits que devuelve ``git log <git_args>``."""
     if not git_args:
         report_error("--git necesita un rango de commits, p. ej. origin/trunk..HEAD")
         return 2
-    commits = commits_from_git(git_args)
+    try:
+        commits = commits_from_git(git_args)
+    except ValueError as exc:
+        report_error(str(exc))
+        return 2
     if not commits:
         print("No hay commits nuevos que comprobar.")
         return 0
@@ -126,8 +165,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("message_file", help="Fichero con el mensaje de commit (hook commit-msg).")
     args = parser.parse_args(argv)
 
-    with open(args.message_file, encoding="utf-8") as fh:
-        subject = subject_from_message(fh.read())
+    try:
+        message_file = message_file_inside_git_dir(args.message_file)
+    except ValueError as exc:
+        report_error(str(exc))
+        return 2
+    subject = subject_from_message(message_file.read_text(encoding="utf-8"))
     if is_valid_subject(subject):
         return 0
     report_error(f"«{subject}» no sigue el formato tipo(ámbito): descripción (#N)")

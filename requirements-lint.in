@@ -1,0 +1,15 @@
+# Herramientas de lint y formato, con versión fija. Este es el fichero que se edita.
+#
+# El hook pre-commit tiene que usar estas mismas versiones (campo rev de
+# .pre-commit-config.yaml) para que el hook y la CI den el mismo resultado; si se
+# cambia una versión, se cambia en los dos sitios (tests/test_ci_scripts.py lo comprueba).
+#
+# Después de editarlo hay que regenerar requirements-lint.txt, el lock con hashes
+# que instala .github/workflows/lint.yml:
+#
+#   pip install uv
+#   uv pip compile requirements-lint.in --generate-hashes --python-version 3.13 --python-platform x86_64-manylinux_2_28 --only-binary :all: -o requirements-lint.txt
+black==26.10.1
+flake8==7.5.0
+flake8-pyproject==1.2.4
+isort==9.0.2

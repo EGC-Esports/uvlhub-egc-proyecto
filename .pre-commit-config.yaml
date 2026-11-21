@@ -19,7 +19,7 @@
 # Los hooks avisan antes del push; quien decide es la CI, que repite las mismas
 # comprobaciones (un hook se puede saltar con --no-verify). Por eso:
 #   * flake8, black e isort usan aquí las MISMAS versiones que
-#     requirements-lint.txt, que es lo que instala .github/workflows/lint.yml.
+#     requirements-lint.in, de donde sale el lock que instala .github/workflows/lint.yml.
 #     tests/test_ci_scripts.py falla si se desincronizan.
 #   * commit-msg y pre-push llaman a los mismos scripts de scripts/ci que los
 #     workflows commits.yml y branch-name.yml.
@@ -30,7 +30,7 @@
 #   (Evitar "pre-commit run --all-files": los fixers de espacios reescribirían
 #   unos 50 ficheros heredados de UVLHub que nadie ha tocado.)
 #   pre-commit autoupdate                           NO usarlo sin actualizar
-#                                                   también requirements-lint.txt
+#                                                   también requirements-lint.in
 # ----------------------------------------------------------------------------
 
 minimum_pre_commit_version: "3.2.0"
@@ -62,7 +62,7 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
-  # --- Lint y formato: mismas versiones que requirements-lint.txt -------------
+  # --- Lint y formato: mismas versiones que requirements-lint.in --------------
   # files: las mismas carpetas que revisa lint.yml (LINT_PATHS), para que el
   # hook no reformatee lo que la CI no mira, como migrations/.
   # stages: se fija a mano porque isort declara también pre-push en su propio
