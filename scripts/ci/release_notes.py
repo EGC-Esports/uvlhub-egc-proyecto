@@ -47,13 +47,21 @@ _REF = r"[A-Za-z0-9][A-Za-z0-9._/@{}~^-]*"
 REVISION_PATTERN = re.compile(rf"{_REF}(\.\.\.?{_REF})?")
 
 
-def git(options: list[str], revisions: list[str]) -> subprocess.CompletedProcess:
-    """Ejecuta git con opciones fijas del código y revisiones validadas tras --end-of-options."""
+def safe_revisions(revisions: list[str]) -> list[str]:
+    """Las revisiones si todas tienen forma de revisión de git; si no, ValueError."""
     for revision in revisions:
         if not REVISION_PATTERN.fullmatch(revision):
             raise ValueError(f"«{revision}» no es una revisión de git válida")
+    return list(revisions)
+
+
+def git(options: list[str], revisions: list[str]) -> subprocess.CompletedProcess:
+    """Ejecuta git con opciones fijas del código y revisiones validadas tras --end-of-options."""
     return subprocess.run(
-        ["git", *options, "--end-of-options", *revisions], capture_output=True, text=True, encoding="utf-8"
+        ["git", *options, "--end-of-options", *safe_revisions(revisions)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 
