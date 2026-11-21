@@ -44,8 +44,14 @@ class HubfileService(BaseService):
         return hubfile_download_record_repository.total_hubfile_downloads()
 
     def directory_for(self, hubfile: Hubfile) -> str:
-        """Absolute filesystem directory holding the hubfile, for send_from_directory."""
-        return os.path.dirname(self.get_path_by_hubfile(hubfile))
+        """Absolute filesystem directory holding the hubfile, for send_from_directory.
+
+        Made absolute explicitly: with WORKING_DIR unset (a local run outside
+        Docker, or CI) the path is relative, and send_from_directory resolves a
+        relative directory against the app package (app/), not the current
+        directory that read_text uses, so every download was a 404.
+        """
+        return os.path.abspath(os.path.dirname(self.get_path_by_hubfile(hubfile)))
 
     def read_text(self, hubfile: Hubfile) -> str | None:
         """Read the hubfile's UVL content. Returns ``None`` if the file is missing."""
