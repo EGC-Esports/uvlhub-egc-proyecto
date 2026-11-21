@@ -7,7 +7,12 @@
 # Configuración del proyecto: sonar-project.properties.
 # Necesita el secreto SONAR_TOKEN. Sin él, el job avisa y no analiza nada.
 # En SonarCloud hay que desactivar el "Automatic Analysis" (choca con el
-# análisis desde la CI) y poner trunk como rama principal.
+# análisis desde la CI).
+#
+# El plan gratuito de SonarCloud solo analiza la rama principal del proyecto
+# (allí se llama "main"). Por eso el análisis de trunk se guarda en esa rama
+# principal: lo que se ve en SonarCloud como "main" es el estado de trunk. Es
+# lo que interesa medir, porque main solo recibe lo que ya estaba en trunk.
 # ----------------------------------------------------------------------------
 
 name: SonarCloud
@@ -59,8 +64,12 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # En un workflow_run, GITHUB_REF apunta a la rama por defecto y no a la que
-      # ha lanzado las pruebas, así que la rama se indica a mano.
+      # Sin sonar.branch.name: en un workflow_run, GITHUB_REF es la rama por
+      # defecto (main), así que el escáner detecta "main", que es la rama principal
+      # de SonarCloud y la única que permite el plan gratuito. Pasar
+      # -Dsonar.branch.name=trunk crearía una rama secundaria que no se puede ver.
+      # scm.revision sí se indica, para que el análisis quede asociado al commit de
+      # trunk que ha pasado las pruebas.
       - name: Analizar con SonarCloud
         if: ${{ steps.token.outputs.present == 'true' }}
         uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
@@ -68,5 +77,4 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.branch.name=${{ github.event.workflow_run.head_branch }}
             -Dsonar.scm.revision=${{ github.event.workflow_run.head_sha }}
