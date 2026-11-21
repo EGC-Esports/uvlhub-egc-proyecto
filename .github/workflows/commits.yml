@@ -28,7 +28,7 @@ jobs:
     steps:
       # Historia completa: hacen falta el commit anterior al push y las demás ramas.
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
