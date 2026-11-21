@@ -1,0 +1,154 @@
+# ----------------------------------------------------------------------------
+# Locust
+# Pruebas de carga en modo headless contra la aplicación arrancada en el runner.
+# Se lanza a mano desde la pestaña Actions (Run workflow) y deploy-prod.yml la
+# llama antes de cada despliegue en producción, es decir, en cada release.
+#
+# Sin feature, carga todos los locustfile.py de app/features/*/tests a través
+# del bootstrap de splent_framework, igual que `rosemary locust`.
+#
+# Locust termina con error si alguna petición falla (respuesta 4xx/5xx o
+# excepción), y entonces el workflow queda en rojo. El informe HTML y los CSV
+# quedan como artefacto "locust-report".
+# ----------------------------------------------------------------------------
+
+name: Locust
+
+on:
+  workflow_dispatch:
+    inputs:
+      users:
+        description: Usuarios simultáneos
+        type: string
+        default: '20'
+      spawn_rate:
+        description: Usuarios nuevos por segundo
+        type: string
+        default: '5'
+      run_time:
+        description: Duración (p. ej. 1m, 30s)
+        type: string
+        default: '1m'
+      feature:
+        description: Feature concreta (vacío = todas), p. ej. auth
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      users:
+        type: string
+        default: '20'
+      spawn_rate:
+        type: string
+        default: '5'
+      run_time:
+        type: string
+        default: '1m'
+      feature:
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: Pruebas de carga
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      USERS: ${{ inputs.users }}
+      SPAWN_RATE: ${{ inputs.spawn_rate }}
+      RUN_TIME: ${{ inputs.run_time }}
+      FEATURE: ${{ inputs.feature }}
+      WORKING_DIR: ''
+      FLASK_ENV: development
+      MARIADB_ROOT_PASSWORD: uvlhub_root_password
+      MARIADB_DATABASE: uvlhubdb
+      MARIADB_TEST_DATABASE: uvlhubdb_test
+      MARIADB_USER: uvlhub_user
+      MARIADB_PASSWORD: uvlhub_password
+      MARIADB_HOSTNAME: 127.0.0.1
+      MARIADB_PORT: 3306
+
+    services:
+      mariadb:
+        image: mariadb:12.0.2
+        env:
+          MARIADB_ROOT_PASSWORD: ${{ env.MARIADB_ROOT_PASSWORD }}
+          MARIADB_DATABASE: ${{ env.MARIADB_DATABASE }}
+          MARIADB_USER: ${{ env.MARIADB_USER }}
+          MARIADB_PASSWORD: ${{ env.MARIADB_PASSWORD }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -u root -p$MARIADB_ROOT_PASSWORD"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validar los parámetros
+        run: |
+          [[ "$USERS" =~ ^[0-9]+$ ]] || { echo "::error::users debe ser un número"; exit 1; }
+          [[ "$SPAWN_RATE" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::spawn_rate debe ser un número"; exit 1; }
+          [[ "$RUN_TIME" =~ ^[0-9]+[smh]$ ]] || { echo "::error::run_time debe ser como 30s, 1m o 1h"; exit 1; }
+          if [ -n "$FEATURE" ]; then
+            if [[ ! "$FEATURE" =~ ^[a-z0-9_]+$ ]] || [ ! -f "app/features/$FEATURE/tests/locustfile.py" ]; then
+              echo "::error::La feature «$FEATURE» no existe o no tiene tests/locustfile.py"
+              exit 1
+            fi
+          fi
+
+      - name: Preparar Python
+        uses: ./.github/actions/setup-python
+
+      - name: Arrancar la aplicación
+        uses: ./.github/actions/start-app
+
+      - name: Ejecutar Locust
+        run: |
+          if [ -n "$FEATURE" ]; then
+            locustfile="app/features/$FEATURE/tests/locustfile.py"
+          else
+            locustfile=$(python -c "from splent_framework.bootstraps import locustfile_bootstrap as m; print(m.__file__)")
+          fi
+          echo "Locustfile: $locustfile"
+          locust -f "$locustfile" --headless \
+            --users "$USERS" --spawn-rate "$SPAWN_RATE" --run-time "$RUN_TIME" \
+            --host http://localhost:5000 \
+            --html locust-report.html --csv locust --only-summary
+
+      - name: Resumen de la carga
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f locust_stats.csv ] || exit 0
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import csv, os
+          print(f"### Locust: {os.environ['USERS']} usuarios durante {os.environ['RUN_TIME']}\n")
+          print("| Petición | Nº | Fallos | Mediana (ms) | p95 (ms) | Peticiones/s |")
+          print("| --- | ---: | ---: | ---: | ---: | ---: |")
+          with open("locust_stats.csv", newline="") as fh:
+              for row in csv.DictReader(fh):
+                  name = row["Name"] if row["Type"] else "**Total**"
+                  print(
+                      f"| {row['Type']} {name} | {row['Request Count']} | {row['Failure Count']} "
+                      f"| {row['Median Response Time']} | {row['95%']} | {float(row['Requests/s']):.1f} |"
+                  )
+          EOF
+
+      - name: Subir el informe
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: locust-report
+          path: |
+            locust-report.html
+            locust_*.csv
+            flask.log
+          if-no-files-found: ignore
+          retention-days: 30

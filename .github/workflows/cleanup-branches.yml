@@ -1,0 +1,84 @@
+# ----------------------------------------------------------------------------
+# Limpieza de ramas
+# EGCFlow: "las ramas que dejan de usarse, se destruyen". Cuando una tarea se
+# integra en trunk con git merge --no-ff, este workflow borra su rama del
+# remoto. Sustituye al paso 9 manual del ciclo de una tarea (la rama local la
+# borra cada uno con git branch -d, y git fetch --prune limpia las referencias).
+#
+# Solo borra una rama si se cumplen las dos condiciones:
+#   * su nombre es de tarea (tipo/N-descripcion): nunca toca main ni trunk;
+#   * su último commit es exactamente el que acaba de integrarse con un merge
+#     en este push a trunk. Si alguien ha seguido trabajando en la rama después
+#     del merge, ya apunta a otro commit y no se borra.
+# Una rama recién creada desde trunk no cumple la segunda condición, aunque su
+# commit esté en trunk, así que tampoco se borra.
+#
+# Si después hay que corregir algo de la tarea, se abre una rama nueva desde
+# trunk (p. ej. fix/N-descripcion), como cualquier otro cambio.
+# ----------------------------------------------------------------------------
+
+name: Limpieza de ramas
+
+on:
+  push:
+    branches: [trunk]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-merged-branches:
+    name: Borrar las ramas integradas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Borrar del remoto las ramas integradas en este push
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "No hay commit anterior con el que comparar; no se borra nada."
+            exit 0
+          fi
+
+          # Último commit de cada rama integrada: el segundo padre de cada merge
+          # que este push ha añadido a la línea principal de trunk.
+          mapfile -t merged_tips < <(
+            git rev-list --merges --first-parent "${BEFORE}..HEAD" | while read -r merge; do
+              git rev-parse "${merge}^2"
+            done
+          )
+          if [ "${#merged_tips[@]}" -eq 0 ]; then
+            echo "Este push no integra ninguna rama con merge."
+            exit 0
+          fi
+
+          deleted=()
+          while read -r sha ref; do
+            branch="${ref#refs/remotes/origin/}"
+            case "$branch" in main|trunk|HEAD) continue ;; esac
+            python3 scripts/ci/check_branch_name.py "$branch" >/dev/null || continue
+            for tip in "${merged_tips[@]}"; do
+              if [ "$sha" = "$tip" ]; then
+                git push origin --delete "$branch"
+                deleted+=("$branch")
+                break
+              fi
+            done
+          done < <(git for-each-ref --format='%(objectname) %(refname)' refs/remotes/origin)
+
+          if [ "${#deleted[@]}" -eq 0 ]; then
+            echo "Ninguna rama de tarea apunta al commit integrado; no se borra nada."
+            exit 0
+          fi
+          {
+            echo "### Ramas integradas y borradas del remoto"
+            echo
+            printf -- '- `%s`\n' "${deleted[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"

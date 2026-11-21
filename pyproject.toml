@@ -65,3 +65,11 @@ markers = [
     "e2e: browser-driven end-to-end tests (requires the selenium grid)",
     "load: locust load tests (run via `rosemary locust`)",
 ]
+
+[tool.coverage.run]
+# Used by `pytest --cov` in .github/workflows/tests.yml. The tests themselves are
+# left out so they do not inflate the percentage, and paths are written relative
+# so SonarCloud can match coverage.xml against the checkout of another job.
+source = ["app"]
+omit = ["app/features/*/tests/*"]
+relative_files = true

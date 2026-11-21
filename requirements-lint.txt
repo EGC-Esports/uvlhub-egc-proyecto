@@ -1,0 +1,8 @@
+# Herramientas de lint y formato, con versión fija.
+# Las usa .github/workflows/lint.yml. El hook pre-commit tiene que usar estas
+# mismas versiones (campo rev de .pre-commit-config.yaml) para que el hook y la
+# CI den el mismo resultado. Si se cambia una versión, se cambia en los dos sitios.
+black==26.10.1
+flake8==7.5.0
+flake8-pyproject==1.2.4
+isort==9.0.2

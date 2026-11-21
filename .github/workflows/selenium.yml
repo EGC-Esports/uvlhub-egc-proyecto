@@ -1,0 +1,136 @@
+# ----------------------------------------------------------------------------
+# Selenium
+# Pruebas de interfaz (marca e2e) contra la aplicación arrancada en el runner.
+# Son lentas, así que solo corren en los push a trunk y a mano desde la pestaña
+# Actions (Run workflow), donde se puede elegir navegador y feature.
+#
+# Cómo se montan:
+#   * La aplicación corre en el runner con la base de datos de desarrollo
+#     sembrada, igual que en docker-compose.dev.yml (las pruebas entran con
+#     user1@example.com).
+#   * El navegador corre en un contenedor selenium/standalone-* con la red del
+#     host, así que para él localhost:5000 es la aplicación. Las pruebas se
+#     conectan a él a través de SELENIUM_GRID_URL.
+# ----------------------------------------------------------------------------
+
+name: Selenium
+
+on:
+  push:
+    branches: [trunk]
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: Navegador
+        type: choice
+        options: [chrome, firefox]
+        default: chrome
+      feature:
+        description: Feature concreta (vacío = todas), p. ej. auth
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selenium-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Pruebas de interfaz (${{ inputs.browser || 'chrome' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    env:
+      # Misma versión que el cliente selenium de requirements.txt.
+      SELENIUM_IMAGE_TAG: 4.43.0-20260404
+      SELENIUM_BROWSER: ${{ inputs.browser || 'chrome' }}
+      SELENIUM_GRID_URL: http://localhost:4444
+      FEATURE: ${{ inputs.feature }}
+      WORKING_DIR: ''
+      FLASK_ENV: development
+      MARIADB_ROOT_PASSWORD: uvlhub_root_password
+      MARIADB_DATABASE: uvlhubdb
+      MARIADB_TEST_DATABASE: uvlhubdb_test
+      MARIADB_USER: uvlhub_user
+      MARIADB_PASSWORD: uvlhub_password
+      MARIADB_HOSTNAME: 127.0.0.1
+      MARIADB_PORT: 3306
+
+    services:
+      mariadb:
+        image: mariadb:12.0.2
+        env:
+          MARIADB_ROOT_PASSWORD: ${{ env.MARIADB_ROOT_PASSWORD }}
+          MARIADB_DATABASE: ${{ env.MARIADB_DATABASE }}
+          MARIADB_USER: ${{ env.MARIADB_USER }}
+          MARIADB_PASSWORD: ${{ env.MARIADB_PASSWORD }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -u root -p$MARIADB_ROOT_PASSWORD"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validar la feature elegida
+        if: ${{ inputs.feature != '' && inputs.feature != null }}
+        run: |
+          if [[ ! "$FEATURE" =~ ^[a-z0-9_]+$ ]] || [ ! -f "app/features/$FEATURE/tests/test_selenium.py" ]; then
+            echo "::error::La feature «$FEATURE» no existe o no tiene tests/test_selenium.py"
+            exit 1
+          fi
+
+      - name: Arrancar el navegador (Selenium standalone)
+        run: |
+          docker run -d --name selenium --network host --shm-size=2g \
+            "selenium/standalone-${SELENIUM_BROWSER}:${SELENIUM_IMAGE_TAG}"
+
+      - name: Preparar Python
+        uses: ./.github/actions/setup-python
+
+      - name: Arrancar la aplicación
+        uses: ./.github/actions/start-app
+
+      - name: Esperar a que Selenium esté listo
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:4444/status | grep -q '"ready": *true'; then
+              echo "Selenium listo"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Selenium no ha arrancado en 2 minutos"
+          docker logs selenium
+          exit 1
+
+      - name: Ejecutar las pruebas de interfaz
+        run: |
+          target=()
+          if [ -n "$FEATURE" ]; then
+            target=("app/features/$FEATURE/tests/test_selenium.py")
+          fi
+          pytest -v -m e2e --junitxml=selenium-report.xml "${target[@]}"
+
+      - name: Guardar los logs si algo falla
+        if: ${{ failure() }}
+        run: docker logs selenium > selenium.log 2>&1 || true
+
+      - name: Subir informes y logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-report-${{ env.SELENIUM_BROWSER }}
+          path: |
+            selenium-report.xml
+            flask.log
+            selenium.log
+          if-no-files-found: ignore
+          retention-days: 14

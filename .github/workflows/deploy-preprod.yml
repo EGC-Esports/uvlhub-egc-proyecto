@@ -1,0 +1,57 @@
+# ----------------------------------------------------------------------------
+# Despliegue en preproducción
+# EGCFlow: "tener despliegues automáticos tanto en trunk como en main". Cuando
+# "Tests" termina bien tras un push a trunk (cada tarea que se integra), lanza
+# el despliegue del servicio de preproducción en Render. Si la CI de trunk está
+# en rojo no se despliega nada. El de main es deploy-prod.yml.
+#
+# Secretos y variables (Settings → Secrets and variables → Actions, o en el
+# environment "preproduction"):
+#   * RENDER_DEPLOY_HOOK_PREPROD (secreto): Deploy Hook del servicio de Render
+#     que sigue la rama trunk (Settings → Deploy Hook en Render).
+#   * PREPROD_URL (variable, opcional): URL pública, se enlaza desde el run.
+# En Render conviene desactivar el Auto-Deploy, para que solo despliegue la CI.
+# ----------------------------------------------------------------------------
+
+name: Despliegue en preproducción
+
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [trunk]
+
+permissions:
+  contents: read
+
+# Los despliegues van de uno en uno y no se cancelan a medias.
+concurrency:
+  group: deploy-preproduction
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Desplegar trunk en preproducción
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: preproduction
+      url: ${{ vars.PREPROD_URL }}
+
+    steps:
+      - name: Lanzar el despliegue en Render
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PREPROD }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::warning::Falta el secreto RENDER_DEPLOY_HOOK_PREPROD: no se ha desplegado nada."
+            exit 0
+          fi
+          curl -fsS -X POST "$DEPLOY_HOOK" -o /dev/null
+          {
+            echo "### Despliegue en preproducción lanzado"
+            echo
+            echo "Commit: \`${SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
