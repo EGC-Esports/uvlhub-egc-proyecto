@@ -68,14 +68,48 @@ def test_subject_skips_git_comment_lines():
     assert commit_msg.subject_from_message(message) == "feat(dataset): subir CSV (#3)"
 
 
-def test_hook_mode_exit_code(tmp_path):
-    good = tmp_path / "good"
+def test_hook_mode_exit_code(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    monkeypatch.chdir(repo)
+    good = repo / ".git" / "COMMIT_EDITMSG"
     good.write_text("fix(auth): corregir login (#9)\n", encoding="utf-8")
-    bad = tmp_path / "bad"
+    bad = repo / ".git" / "MERGE_MSG"
     bad.write_text("corregir login\n", encoding="utf-8")
 
     assert commit_msg.main([str(good)]) == 0
-    assert commit_msg.main([str(bad)]) == 1
+    assert commit_msg.main([".git/MERGE_MSG"]) == 1  # relative path, as the hook passes it
+
+
+def test_hook_mode_only_reads_files_inside_the_git_directory(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    monkeypatch.chdir(repo)
+    outside = tmp_path / "secret.txt"
+    outside.write_text("feat(x): y (#1)\n", encoding="utf-8")
+
+    assert commit_msg.main([str(outside)]) == 2
+    assert commit_msg.main([".git/../../secret.txt"]) == 2  # path traversal out of .git
+
+
+@pytest.mark.parametrize("revision", ["--output=pwned.txt", "-p", "HEAD --all", "", "..HEAD", "HEAD;rm -rf /"])
+def test_git_mode_rejects_anything_that_is_not_a_revision(tmp_path, monkeypatch, revision):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "feat(x): y (#1)")
+    monkeypatch.chdir(tmp_path)
+
+    assert commit_msg.main(["--git", revision]) == 2
+    assert not (tmp_path / "pwned.txt").exists()
+
+
+@pytest.mark.parametrize(
+    "revision", ["HEAD", "HEAD~1..HEAD", "abc123...HEAD", "^refs/remotes/origin/trunk", "origin/feat/12-x", "v0.2.0^"]
+)
+def test_valid_revisions_are_accepted(revision):
+    assert commit_msg.safe_revisions([revision]) == [revision]
+    assert release_notes.REVISION_PATTERN.fullmatch(revision.lstrip("^"))
 
 
 def _git(repo, *args):
@@ -143,17 +177,27 @@ def test_pre_push_blocks_main_unless_explicitly_allowed():
     assert branch_name.check_pre_push({**env, "ALLOW_PUSH_TO_MAIN": "1"}) == 0
 
 
+def _pins(path):
+    """{package: version} from a requirements file, plain or a hashed lock (``pkg==1.0 \\`` + ``--hash`` lines)."""
+    pins = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", "--")):
+            continue
+        package, _, version = line.split()[0].partition("==")
+        pins[package.lower()] = version
+    return pins
+
+
 def test_pre_commit_hooks_pin_the_same_lint_versions_as_the_ci():
     """The hook and lint.yml must agree, or code that passes locally fails in CI (and vice versa)."""
     import yaml
 
     root = SCRIPTS_DIR.parent.parent
-    pinned = {}
-    for line in (root / "requirements-lint.txt").read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            package, _, version = line.partition("==")
-            pinned[package.lower()] = version
+    pinned = _pins(root / "requirements-lint.in")
+    locked = _pins(root / "requirements-lint.txt")
+    # The lock that lint.yml installs must be regenerated whenever the .in changes.
+    assert {package: locked.get(package) for package in pinned} == pinned
 
     config = yaml.safe_load((root / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     revs = {}
@@ -206,6 +250,18 @@ def test_release_notes_from_git_tags(tmp_path, monkeypatch, capsys):
     notes = capsys.readouterr().out
     assert "Primera release del proyecto." in notes
     assert "**auth:** login (#1)" in notes
+
+
+def test_release_notes_reject_option_like_tags(tmp_path, monkeypatch, capsys):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "feat(x): y (#1)")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError):
+        release_notes.git(["log"], ["--output=pwned.txt"])
+    assert release_notes.main(["v0.1.0;rm"]) == 2
+    assert release_notes.main(["HEAD", "--since=--output=pwned.txt"]) == 2
+    assert not (tmp_path / "pwned.txt").exists()
 
 
 def test_release_notes_for_the_first_release():

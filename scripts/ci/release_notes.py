@@ -11,6 +11,10 @@ Uso::
     python scripts/ci/release_notes.py v0.2.0 --since v0.1.0
 
 Escribe el Markdown por la salida estándar.
+
+Seguridad: el tag y --since solo pueden tener los caracteres de una revisión de git
+y nunca empezar por ``-``, y van detrás de ``--end-of-options``, así que git nunca
+los toma por opciones.
 """
 
 import argparse
@@ -38,29 +42,39 @@ FORK_POINT = "cb8bec81b1b79db8f361bc2f210e4dd31df219d7"
 
 TYPE_PATTERN = re.compile(r"^(?P<type>[a-z]+)(\((?P<scope>[a-z0-9-]+)\))?(?P<breaking>!)?: (?P<description>.+)$")
 
+# Una revisión de git: tag, sha, v0.2.0^, A..B. Empieza siempre por letra o número.
+_REF = r"[A-Za-z0-9][A-Za-z0-9._/@{}~^-]*"
+REVISION_PATTERN = re.compile(rf"{_REF}(\.\.\.?{_REF})?")
 
-def git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True, encoding="utf-8").stdout
+
+def git(options: list[str], revisions: list[str]) -> subprocess.CompletedProcess:
+    """Ejecuta git con opciones fijas del código y revisiones validadas tras --end-of-options."""
+    for revision in revisions:
+        if not REVISION_PATTERN.fullmatch(revision):
+            raise ValueError(f"«{revision}» no es una revisión de git válida")
+    return subprocess.run(
+        ["git", *options, "--end-of-options", *revisions], capture_output=True, text=True, encoding="utf-8"
+    )
 
 
 def previous_tag(tag: str) -> str | None:
     """Último tag ``v*`` alcanzable desde el commit anterior a ``tag``, o None si es la primera release."""
-    try:
-        return git("describe", "--tags", "--abbrev=0", "--match", "v*", f"{tag}^").strip() or None
-    except subprocess.CalledProcessError:
-        return None
+    result = git(["describe", "--tags", "--abbrev=0", "--match", "v*"], [f"{tag}^"])
+    return (result.stdout.strip() or None) if result.returncode == 0 else None
 
 
 def fork_point_for(tag: str) -> str | None:
     """FORK_POINT si es antecesor de ``tag`` (siempre lo es en este repositorio), si no None."""
-    result = subprocess.run(["git", "merge-base", "--is-ancestor", FORK_POINT, tag], capture_output=True)
+    result = git(["merge-base", "--is-ancestor"], [FORK_POINT, tag])
     return FORK_POINT if result.returncode == 0 else None
 
 
 def commits_between(since: str | None, tag: str) -> list[tuple[str, str]]:
     revision = f"{since}..{tag}" if since else tag
-    output = git("log", "--no-merges", "--format=%h%x1f%s", revision)
-    return [tuple(line.split("\x1f", 1)) for line in output.splitlines() if line]
+    result = git(["log", "--no-merges", "--format=%h%x1f%s"], [revision])
+    if result.returncode != 0:
+        raise RuntimeError(f"git log falló: {result.stderr.strip()}")
+    return [tuple(line.split("\x1f", 1)) for line in result.stdout.splitlines() if line]
 
 
 def render(tag: str, since: str | None, commits: list[tuple[str, str]]) -> str:
@@ -107,8 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--since", help="Tag desde el que contar. Por defecto, el tag v* anterior.")
     args = parser.parse_args(argv)
 
-    since = args.since or previous_tag(args.tag) or fork_point_for(args.tag)
-    print(render(args.tag, since, commits_between(since, args.tag)))
+    try:
+        since = args.since or previous_tag(args.tag) or fork_point_for(args.tag)
+        notes = render(args.tag, since, commits_between(since, args.tag))
+    except (ValueError, RuntimeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    print(notes)
     return 0
 
 

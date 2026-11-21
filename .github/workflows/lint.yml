@@ -1,8 +1,13 @@
 # ----------------------------------------------------------------------------
 # Lint
 # flake8, black e isort sobre todo el código Python. La configuración de las
-# tres está en pyproject.toml y las versiones, fijadas en requirements-lint.txt,
+# tres está en pyproject.toml y las versiones, fijadas en requirements-lint.in,
 # son las mismas que usa el hook pre-commit.
+#
+# Se instalan desde requirements-lint.txt, un lock generado con todas las
+# dependencias, sus hashes y solo wheels: --require-hashes rechaza cualquier
+# paquete que no coincida con el hash, y --only-binary :all: impide ejecutar
+# scripts de instalación de paquetes en código fuente.
 # ----------------------------------------------------------------------------
 
 name: Lint
@@ -35,7 +40,7 @@ jobs:
           cache-dependency-path: requirements-lint.txt
 
       - name: Instalar las herramientas de lint
-        run: pip install -r requirements-lint.txt
+        run: 'pip install --only-binary :all: --require-hashes -r requirements-lint.txt'
 
       - name: flake8
         run: flake8 $LINT_PATHS

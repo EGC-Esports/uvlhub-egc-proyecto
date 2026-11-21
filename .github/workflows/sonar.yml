@@ -34,7 +34,12 @@ permissions:
 jobs:
   sonar:
     name: Análisis de calidad
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    # Solo runs de Tests que vienen de un push a este mismo repositorio: un fork no
+    # puede hacer que se ejecute su código aquí con el SONAR_TOKEN disponible.
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -55,7 +60,9 @@ jobs:
           fi
 
       # El commit que ha pasado las pruebas, no el último de la rama. Historia
-      # completa para que Sonar pueda atribuir cada línea nueva.
+      # completa para que Sonar pueda atribuir cada línea nueva. Es seguro porque
+      # el job solo corre para pushes a este repositorio (condición if de arriba),
+      # y no se ejecuta nada del checkout: solo lo lee el escáner.
       - name: Checkout
         if: ${{ steps.token.outputs.present == 'true' }}
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
