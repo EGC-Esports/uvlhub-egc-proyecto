@@ -140,6 +140,21 @@ def test_download_file_serves_the_file_as_an_attachment(test_client, monkeypatch
     assert "Max-Age=63072000" in set_cookie
 
 
+def test_download_file_works_with_an_empty_working_dir(test_client, monkeypatch, tmp_path):
+    """Outside Docker WORKING_DIR is empty and upload paths are relative to the current
+    directory. send_from_directory used to resolve them against app/ instead and 404."""
+    monkeypatch.setenv("WORKING_DIR", "")
+    monkeypatch.chdir(tmp_path)
+    with test_client.application.app_context():
+        user_id, dataset_id, file_id = _make_hubfile()
+        _write_upload(tmp_path, user_id, dataset_id, "model.uvl", UVL_CONTENT)
+
+    response = test_client.get(f"/file/download/{file_id}")
+
+    assert response.status_code == 200
+    assert response.data.decode() == UVL_CONTENT
+
+
 def test_download_file_records_the_download_once_per_cookie(test_client, monkeypatch, tmp_path):
     monkeypatch.setenv("WORKING_DIR", str(tmp_path))
     with test_client.application.app_context():
