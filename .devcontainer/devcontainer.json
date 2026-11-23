@@ -8,11 +8,32 @@
     "db",
     "nginx"
   ],
-  "forwardPorts": [
-    5000,
-    3306,
-    80
+  "initializeCommand": [
+    "docker",
+    "run",
+    "--rm",
+    "-v",
+    "${localWorkspaceFolder}:/w",
+    "python:3.13-slim",
+    "sh",
+    "-c",
+    "[ -f /w/.env ] || { cp /w/.env.docker.example /w/.env && chown \"$(stat -c %u:%g /w)\" /w/.env && echo 'Creado .env a partir de .env.docker.example'; }"
   ],
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "os-provided"
+    }
+  },
+  "postCreateCommand": "sh .devcontainer/post-create.sh",
+  "forwardPorts": [
+    5000
+  ],
+  "portsAttributes": {
+    "5000": {
+      "label": "Flask (directo)",
+      "onAutoForward": "notify"
+    }
+  },
   "shutdownAction": "stopCompose",
   "customizations": {
     "vscode": {
@@ -20,19 +41,34 @@
         "ms-azuretools.vscode-docker",
         "ms-python.python",
         "ms-python.debugpy",
-        "KevinRose.vsc-python-indent",
+        "ms-python.black-formatter",
+        "ms-python.isort",
         "ms-python.flake8",
+        "KevinRose.vsc-python-indent",
         "dbaeumer.vscode-eslint",
         "twixes.pypi-assistant",
         "cstrap.flask-snippets"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/opt/venv/bin/python",
-        "python.formatting.provider": "black",
-        "python.linting.enabled": true,
-        "python.linting.flake8Enabled": true,
-        "python.linting.flake8Path": "flake8",
-        "editor.formatOnSave": true
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "black-formatter.path": [
+          "/opt/lint/bin/black"
+        ],
+        "isort.path": [
+          "/opt/lint/bin/isort"
+        ],
+        "flake8.path": [
+          "/opt/lint/bin/flake8"
+        ],
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.black-formatter",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        }
       }
     }
   },
