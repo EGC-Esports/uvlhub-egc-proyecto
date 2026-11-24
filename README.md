@@ -6,6 +6,10 @@
 
 Repository of feature models in UVL format integrated with Zenodo and flamapy following Open Science principles - Developed by DiversoLab
 
+## Documentación del proyecto (Esports-hub)
+
+Consulta la guía central en **[docs/README.md](docs/README.md)**, donde se centralizan la normativa de ramas (**EGCFlow**), política de commits, Git hooks, configuración del [Dev Container](docs/devcontainer.md), documentación técnica del [dataset de Valorant](docs/dataset-valorant.md), el [diario del equipo](docs/diario/README.md) y el [Acta Fundacional](docs/diario/actas/acta-fundacional.md).
+
 ## Official documentation
 
 You can consult the official documentation of the project at [docs.uvlhub.io](https://docs.uvlhub.io/)
