@@ -3,6 +3,7 @@ from enum import Enum
 
 from flask import request
 from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy.orm import declared_attr
 
 from app import db
 
@@ -64,21 +65,50 @@ class DSMetaData(db.Model):
     authors = db.relationship("Author", backref="ds_meta_data", lazy=True, cascade="all, delete")
 
 
-class DataSet(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+class BaseDataset(db.Model):
+    """Lo común a cualquier dataset del hub, sea cual sea su tipo de fichero.
 
-    ds_meta_data_id = db.Column(db.Integer, db.ForeignKey("ds_meta_data.id"), nullable=False)
+    Los metadatos comunes (título, descripción, autores, DOI, tags y tipo de
+    publicación) viven en ``DSMetaData``; las descargas y visitas, en
+    ``DSDownloadRecord`` y ``DSViewRecord``.
+
+    Es abstracta: no tiene tabla propia y no cambia el esquema de la base de
+    datos. Ver ``docs/arquitectura/wi-1.1-acoplamiento-uvl-basedataset.md``.
+    """
+
+    __abstract__ = True
+
+    id = db.Column(db.Integer, primary_key=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
-    ds_meta_data = db.relationship("DSMetaData", backref=db.backref("data_set", uselist=False))
-    feature_models = db.relationship("FeatureModel", backref="data_set", lazy=True, cascade="all, delete")
+    @declared_attr
+    def user_id(cls):
+        return db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    @declared_attr
+    def ds_meta_data_id(cls):
+        return db.Column(db.Integer, db.ForeignKey("ds_meta_data.id"), nullable=False)
+
+    @declared_attr
+    def ds_meta_data(cls):
+        return db.relationship("DSMetaData", backref=db.backref("data_set", uselist=False))
+
+    # ── Lo que cada tipo de dataset tiene que aportar ───────────────────
+
+    def files(self):
+        """Ficheros (``Hubfile``) que forman el dataset."""
+        raise NotImplementedError(f"{type(self).__name__} debe implementar files()")
+
+    # ── Comportamiento común ────────────────────────────────────────────
 
     def name(self):
         return self.ds_meta_data.title
 
-    def files(self):
-        return [file for fm in self.feature_models for file in fm.files]
+    def get_files_count(self):
+        return len(self.files())
+
+    def get_file_total_size(self):
+        return sum(file.size for file in self.files())
 
     def delete(self):
         db.session.delete(self)
@@ -91,12 +121,6 @@ class DataSet(db.Model):
         if self.ds_meta_data.dataset_doi and self.ds_meta_data.deposition_id:
             return f"https://zenodo.org/record/{self.ds_meta_data.deposition_id}"
         return None
-
-    def get_files_count(self):
-        return sum(len(fm.files) for fm in self.feature_models)
-
-    def get_file_total_size(self):
-        return sum(file.size for fm in self.feature_models for file in fm.files)
 
     def get_file_total_size_for_human(self):
         from app.features.dataset.services import SizeService
@@ -123,14 +147,43 @@ class DataSet(db.Model):
             "url": self.get_uvlhub_doi(),
             "download": f'{request.host_url.rstrip("/")}/dataset/download/{self.id}',
             "zenodo": self.get_zenodo_url(),
-            "files": [file.to_dict() for fm in self.feature_models for file in fm.files],
+            "files": [file.to_dict() for file in self.files()],
             "files_count": self.get_files_count(),
             "total_size_in_bytes": self.get_file_total_size(),
             "total_size_in_human_format": self.get_file_total_size_for_human(),
         }
 
+
+class UVLDataset(BaseDataset):
+    """Dataset de modelos de características en UVL: el tipo que ya traía uvlhub.
+
+    Sus ficheros cuelgan de ``FeatureModel`` (con sus ``FMMetaData``), así que
+    los métodos de ficheros recorren los modelos de características.
+    """
+
+    # Misma tabla de siempre: el refactor no cambia el esquema.
+    __tablename__ = "data_set"
+
+    feature_models = db.relationship("FeatureModel", backref="data_set", lazy=True, cascade="all, delete")
+
+    def files(self):
+        return [file for fm in self.feature_models for file in fm.files]
+
+    # Recorren los modelos directamente, igual que antes del refactor.
+    def get_files_count(self):
+        return sum(len(fm.files) for fm in self.feature_models)
+
+    def get_file_total_size(self):
+        return sum(file.size for fm in self.feature_models for file in fm.files)
+
     def __repr__(self):
         return f"DataSet<{self.id}>"
+
+
+# Nombre que usa el resto de la aplicación desde antes del refactor. Se mantiene
+# para no tocar las features ni las pruebas que lo importan; el código nuevo
+# debe usar BaseDataset (lo común) o UVLDataset (lo específico de UVL).
+DataSet = UVLDataset
 
 
 class DSDownloadRecord(db.Model):

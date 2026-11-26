@@ -16,7 +16,19 @@ dataset_fields = {
 
 dataset_serializer = Serializer(dataset_fields, related_serializers={"files": file_serializer})
 
-DataSetResource = create_resource(DataSet, dataset_serializer)
+DataSetResourceBase = create_resource(DataSet, dataset_serializer)
+
+
+class DataSetResource(DataSetResourceBase):
+    """El recurso toma el nombre de la clase del modelo para sus mensajes.
+
+    Desde el WI-1.1 (#8) la clase se llama UVLDataset; se fija "DataSet" para
+    que la API siga respondiendo igual ("DataSet not found").
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.model_name = "DataSet"
 
 
 def init_blueprint_api(api):
