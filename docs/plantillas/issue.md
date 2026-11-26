@@ -51,6 +51,13 @@ Utiliza uno de los dos modelos siguientes al abrir una nueva issue en GitHub.
 
 [Contexto breve del error detectado y dónde se produce.]
 
+## Entorno usado
+
+- **Sistema operativo:** [ej. Windows 11, Ubuntu 24.04, macOS]
+- **Entorno de ejecución:** [ej. Dev Container, Docker local, entorno nativo, preproducción o producción]
+- **Navegador y versión** *(si aplica a interfaz)*: [ej. Chrome, Firefox, Edge]
+- **Rama / commit o versión:** [ej. `trunk`, `v0.1.0`, hash del commit]
+
 ## Pasos para reproducir
 
 1. [Paso 1]

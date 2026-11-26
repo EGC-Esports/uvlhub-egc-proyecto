@@ -17,7 +17,7 @@ Este directorio recoge la memoria de trabajo del equipo **Esports-hub** durante 
 | DEC-002 | [DEC-002-roles.md](decisiones/DEC-002-roles.md) | Aceptada (completada en el Acta Fundacional) | Asignación inicial de Project Manager (Pedro) y DevOps (David) |
 | DEC-003 | [DEC-003-comunicacion-y-reuniones.md](decisiones/DEC-003-comunicacion-y-reuniones.md) | Aceptada | Canales de comunicación, cadencia de reuniones y resumen semanal |
 | DEC-004 | [DEC-004-tareas-y-ci.md](decisiones/DEC-004-tareas-y-ci.md) | Aceptada | Gestión de tareas en GitHub Projects, EGCFlow, pruebas y CI/CD |
-| DEC-005 | [DEC-005-hooks-workflows-metodologia.md](decisiones/DEC-005-hooks-workflows-metodologia.md) | Propuesta (pendiente de aprobar en reunión) | Propuesta detallada de hooks locales, workflows de GitHub Actions y metodología |
+| DEC-005 | [DEC-005-hooks-workflows-metodologia.md](decisiones/DEC-005-hooks-workflows-metodologia.md) | Aceptada | Definición operativa de hooks locales, workflows de GitHub Actions y metodología de trabajo |
 
 ## Cómo añadir una nueva entrada
 

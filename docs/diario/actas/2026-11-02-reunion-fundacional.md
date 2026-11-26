@@ -88,14 +88,14 @@ El acta fundacional se fechará el 9 de noviembre. Pedro compartirá un PDF para
 
 | Tarea | Responsable | Issue |
 | --- | --- | --- |
-| Preguntar al coordinador si los WI los asigna el profesorado o los elige el equipo | Pedro | |
-| Adaptar el acta fundacional con lo acordado en esta reunión | Pedro | |
-| Compartir el acta fundacional en PDF para firmarla | Pedro | |
-| Aceptar la invitación al repositorio de GitHub | Todos | |
-| Conseguir los datos de Hugo | Por asignar | |
-| Definir el formato del CSV (columnas obligatorias) a partir del dataset de Valorant | Por asignar | |
-| Preparar un hook de pre-commit para Conventional Commits | David | |
-| Consultar en el seguimiento del 9 de noviembre si el acta puede modificarse más adelante | Pedro | |
+| Preguntar al coordinador si los WI los asigna el profesorado o los elige el equipo | Pedro | - |
+| Adaptar el acta fundacional con lo acordado en esta reunión | Pedro | - |
+| Compartir el acta fundacional en PDF para firmarla | Pedro | - |
+| Aceptar la invitación al repositorio de GitHub | Todos | - |
+| Conseguir los datos de Kaggle | Raúl | - |
+| Definir el formato del CSV (columnas obligatorias) a partir del dataset de Valorant | Raúl | - |
+| Preparar un hook de pre-commit para Conventional Commits | David | - |
+| Consultar en el seguimiento del 9 de noviembre si el acta puede modificarse más adelante | Pedro | - |
 
 ## Próxima reunión
 

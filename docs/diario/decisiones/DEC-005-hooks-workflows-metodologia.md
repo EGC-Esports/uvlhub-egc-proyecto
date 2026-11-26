@@ -1,7 +1,7 @@
-# Propuesta: hooks, workflows y metodología de trabajo
+# DEC-005: Hooks locales, workflows de CI/CD y metodología de trabajo
 
 - **Fecha:** 20 de noviembre de 2026
-- **Estado:** propuesta, pendiente de aprobar en reunión. Una vez aceptada se registrará en el diario como DEC-005.
+- **Estado:** aceptada
 - **Redacta:** Pedro José Payán Aguilera (Project Manager)
 - **Relacionado con:** [acta fundacional](../actas/acta-fundacional.md) (§7 y §8), [DEC-003](./DEC-003-comunicacion-y-reuniones.md), [DEC-004](./DEC-004-tareas-y-ci.md)
 
@@ -196,7 +196,7 @@ Conviene resolverlos antes del seguimiento del 23 de noviembre:
 | Adaptar los workflows a todas las ramas y añadir cobertura | David | 30 de noviembre |
 | Despliegues de preproducción y producción | David | 30 de noviembre |
 | Selenium, Locust y SonarCloud en la CI | David y Pedro (calidad) | 30 de noviembre |
-| Registrar esta propuesta como DEC-005 una vez aprobada | Pedro | Próxima reunión |
+| Registrar DEC-005 en el diario | Pedro | Completada |
 
 ---
 

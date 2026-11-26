@@ -241,7 +241,7 @@ Todas las nuevas issues del repositorio siguen los modelos definidos en [`docs/p
    > Todas las issues nuevas deben usar exactamente estas etiquetas normalizadas (evitando etiquetas o campos sueltos como `Low` o `Medium` para mantener filtros consistentes).
 
 3. **Estructura del cuerpo y cierre:**
-   - **Cuerpo:** descripción clara, lista de tareas/requisitos y `Criterios de aceptación` verificables (en *bugs*, además, pasos para reproducir, resultado esperado, resultado obtenido y prueba automatizada de regresión).
+   - **Cuerpo:** descripción clara, lista de tareas/requisitos y `Criterios de aceptación` verificables (en *bugs*, además, **entorno usado**, pasos para reproducir, resultado esperado, resultado obtenido y prueba automatizada de regresión).
    - **Planificación y flujo:** asignar `Assignees`, `Milestone` (`v0.1.0`, `v0.2.0` o `v1.0.0`) y añadir al tablero de **GitHub Projects** (`Pendiente` → `En progreso` → `En revisión` → `Hecho`).
    - **Cierre:** cierra la issue una persona distinta de quien la implementó tras verificar los criterios de aceptación.
 
