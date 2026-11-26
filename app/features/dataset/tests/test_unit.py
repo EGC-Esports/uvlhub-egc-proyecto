@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.features.dataset.forms import DataSetForm
-from app.features.dataset.models import DataSet, PublicationType
+from app.features.dataset.models import BaseDataset, DataSet, PublicationType, UVLDataset
 from app.features.dataset.services import SizeService, calculate_checksum_and_size
 
 pytestmark = pytest.mark.unit
@@ -89,6 +89,39 @@ def test_files_and_sizes_are_aggregated_across_feature_models():
     assert DataSet.get_files_count(dataset) == 3
     assert DataSet.get_file_total_size(dataset) == 1024
     assert len(DataSet.files(dataset)) == 3
+
+
+def test_base_dataset_is_abstract_and_has_no_table():
+    assert BaseDataset.__dict__.get("__abstract__") is True
+    assert not hasattr(BaseDataset, "__table__")
+
+
+def test_uvl_dataset_inherits_base_dataset_and_keeps_the_data_set_table():
+    assert issubclass(UVLDataset, BaseDataset)
+    assert UVLDataset.__table__.name == "data_set"
+
+
+def test_dataset_alias_points_at_uvl_dataset():
+    assert DataSet is UVLDataset
+
+
+def test_uvl_dataset_table_keeps_the_original_columns():
+    columns = {column.name for column in UVLDataset.__table__.columns}
+
+    assert columns == {"id", "user_id", "ds_meta_data_id", "created_at"}
+
+
+def test_base_dataset_files_must_be_implemented_by_each_dataset_type():
+    with pytest.raises(NotImplementedError):
+        BaseDataset.files(SimpleNamespace())
+
+
+def test_base_dataset_counts_and_sizes_come_from_files():
+    files = [SimpleNamespace(size=10), SimpleNamespace(size=32)]
+    dataset = SimpleNamespace(files=lambda: files)
+
+    assert BaseDataset.get_files_count(dataset) == 2
+    assert BaseDataset.get_file_total_size(dataset) == 42
 
 
 def test_publication_type_none_is_the_documented_default_value():
