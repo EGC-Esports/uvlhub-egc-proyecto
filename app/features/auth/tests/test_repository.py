@@ -1,9 +1,10 @@
 """Repository-level tests for auth — UserRepository against the DB."""
 
 import pytest
+import sqlalchemy as sa
 
 from app import db
-from app.features.auth.models import RecoveryCode
+from app.features.auth.models import RecoveryCode, User
 from app.features.auth.repositories import RecoveryCodeRepository, UserRepository
 
 pytestmark = pytest.mark.repository
@@ -41,6 +42,43 @@ def test_two_factor_columns_have_defaults(test_app):
         assert user.two_factor_enabled is False
         assert user.totp_secret is None
         assert user.recovery_codes == []
+
+
+def _stored_totp_secret(user_id):
+    """Valor de la columna tal cual está en la base de datos, sin descifrar."""
+    column = User.__table__.c.totp_secret
+    query = sa.select(sa.type_coerce(column, sa.String)).where(User.__table__.c.id == user_id)
+    return db.session.execute(query).scalar_one()
+
+
+def test_totp_secret_is_stored_encrypted(test_app):
+    with test_app.app_context():
+        user = UserRepository().create(email="tfa-encrypted@example.com", password="pass1234")
+        secret = user.generate_totp_secret()
+        db.session.commit()
+
+        stored = _stored_totp_secret(user.id)
+        assert stored is not None
+        assert secret not in stored
+
+        db.session.expire(user)
+        assert user.totp_secret == secret
+
+
+def test_unreadable_totp_secret_is_loaded_as_none(test_app):
+    with test_app.app_context():
+        user = UserRepository().create(email="tfa-unreadable@example.com", password="pass1234")
+        # Un valor en claro (o cifrado con otra clave) no se puede descifrar.
+        db.session.execute(
+            sa.update(User.__table__)
+            .where(User.__table__.c.id == user.id)
+            .values(totp_secret=sa.type_coerce("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", sa.String))
+        )
+        db.session.commit()
+
+        db.session.expire(user)
+        assert user.totp_secret is None
+        assert user.verify_totp("123456") is False
 
 
 def test_recovery_codes_are_persisted_for_user(test_app):

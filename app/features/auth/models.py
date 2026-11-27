@@ -9,6 +9,7 @@ from sqlalchemy import false
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import db
+from app.features.auth.encryption import EncryptedString
 
 # Nombre que muestran las apps de autenticación (Google Authenticator, Authy...).
 TOTP_ISSUER = "Esports-hub"
@@ -34,7 +35,9 @@ class User(db.Model, UserMixin):
 
     # Secreto TOTP en base32. Se genera al empezar a configurar el 2FA y solo
     # cuenta cuando two_factor_enabled es True (tras confirmar un primer código).
-    totp_secret = db.Column(db.String(32), nullable=True)
+    # En la base de datos se guarda cifrado (ver encryption.py); el atributo
+    # siempre tiene el valor en claro.
+    totp_secret = db.Column(EncryptedString(255), nullable=True)
     two_factor_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=false())
 
     data_sets = db.relationship("DataSet", backref="user", lazy=True)
