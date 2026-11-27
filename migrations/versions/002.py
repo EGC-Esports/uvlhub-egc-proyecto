@@ -18,7 +18,8 @@ depends_on = None
 
 def upgrade():
     with op.batch_alter_table('user', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('totp_secret', sa.String(length=32), nullable=True))
+        # Guarda el secreto cifrado con Fernet (~140 caracteres), no el base32 en claro.
+        batch_op.add_column(sa.Column('totp_secret', sa.String(length=255), nullable=True))
         batch_op.add_column(
             sa.Column('two_factor_enabled', sa.Boolean(), nullable=False, server_default=sa.false())
         )
@@ -37,9 +38,9 @@ def upgrade():
 
 
 def downgrade():
-    with op.batch_alter_table('recovery_code', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_recovery_code_user_id'))
-
+    # Sin drop_index previo: MariaDB no deja borrar ix_recovery_code_user_id
+    # mientras lo use la clave foránea (error 1553). Al borrar la tabla se va
+    # también el índice.
     op.drop_table('recovery_code')
 
     with op.batch_alter_table('user', schema=None) as batch_op:
