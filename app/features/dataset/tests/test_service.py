@@ -2,7 +2,7 @@
 
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from zipfile import ZipFile
 
@@ -11,7 +11,12 @@ from werkzeug.datastructures import FileStorage
 
 from app.features.auth.repositories import UserRepository
 from app.features.dataset.models import PublicationType
-from app.features.dataset.repositories import AuthorRepository, DataSetRepository, DSMetaDataRepository
+from app.features.dataset.repositories import (
+    AuthorRepository,
+    DataSetRepository,
+    DSDownloadRecordRepository,
+    DSMetaDataRepository,
+)
 from app.features.dataset.services import (
     DataSetService,
     DOIMappingService,
@@ -27,18 +32,20 @@ def _make_user(email):
     return UserRepository().create(email=email, password="secret")
 
 
-def _make_dataset(user, title="Sample dataset", doi=None):
+def _make_dataset(user, title="Sample dataset", doi=None, tags="tag1,tag2", authors=None, created_at=None):
     meta = DSMetaDataRepository().create(
         title=title,
         description=f"Description for {title}",
         publication_type=PublicationType.DATA_MANAGEMENT_PLAN,
         dataset_doi=doi,
-        tags="tag1,tag2",
+        tags=tags,
     )
+    for author_name in authors or []:
+        AuthorRepository().create(name=author_name, ds_meta_data_id=meta.id)
     return DataSetRepository().create(
         user_id=user.id,
         ds_meta_data_id=meta.id,
-        created_at=datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(timezone.utc),
     )
 
 
@@ -218,3 +225,144 @@ def test_build_download_archive_yields_an_empty_zip_when_nothing_was_uploaded(
         with ZipFile(os.path.join(tmp_dir, zip_name)) as archive:
             assert archive.namelist() == []
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _seed_downloads(dataset, count):
+    repo = DSDownloadRecordRepository()
+    for i in range(count):
+        repo.create(
+            user_id=None,
+            dataset_id=dataset.id,
+            download_date=datetime.now(timezone.utc),
+            download_cookie=f"cookie-{dataset.id}-{i}",
+        )
+
+
+def test_get_recommendations_orders_known_seeded_datasets_by_score(test_app, clean_database):
+    with test_app.app_context():
+        owner = _make_user("recommender@example.com")
+        now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+
+        target = _make_dataset(
+            owner,
+            title="Feature Models for Software Product Lines",
+            doi="10.1234/target",
+            tags="spl, uvl, variability",
+            authors=["Lovelace, Ada", "Turing, Alan"],
+            created_at=now,
+        )
+
+        # 1st expected: 2 shared tags (6.0) + 1 shared author (2.0) + 5 downloads (~1.79) + fresh (1.0) = ~10.79
+        top_match = _make_dataset(
+            owner,
+            title="Variability Models for Mobile Apps",
+            doi="10.1234/top",
+            tags="spl, variability, mobile",
+            authors=["Lovelace, Ada"],
+            created_at=now,
+        )
+        _seed_downloads(top_match, 5)
+
+        # 2nd expected: 1 shared tag (3.0) + 1 shared author (2.0) + 10 downloads (~2.40) + 30d old (0.5) = ~7.90
+        second_match = _make_dataset(
+            owner,
+            title="SPL Datasets from Industry",
+            doi="10.1234/second",
+            tags="spl, industry",
+            authors=["Turing, Alan"],
+            created_at=now - timedelta(days=30),
+        )
+        _seed_downloads(second_match, 10)
+
+        # 3rd expected: 1 shared tag (3.0) + 0 authors + 20 downloads (~3.04) + 30d old (0.5) = ~6.54
+        third_popular = _make_dataset(
+            owner,
+            title="Popular UVL Benchmark",
+            doi="10.1234/third",
+            tags="uvl",
+            authors=["Hopper, Grace"],
+            created_at=now - timedelta(days=30),
+        )
+        _seed_downloads(third_popular, 20)
+
+        # 4th expected: 1 shared tag (3.0) + 0 authors + 0 downloads + 10d old (0.75) = 3.75
+        fourth_recent = _make_dataset(
+            owner,
+            title="Recent UVL Case Study",
+            doi="10.1234/fourth",
+            tags="uvl",
+            authors=["Dijkstra, Edsger"],
+            created_at=now - timedelta(days=10),
+        )
+
+        # 5th expected: 1 shared tag (3.0) + 0 authors + 0 downloads + 90d old (0.25) = 3.25
+        fifth_older = _make_dataset(
+            owner,
+            title="Historical UVL Archive",
+            doi="10.1234/fifth",
+            tags="uvl",
+            authors=["Dijkstra, Edsger"],
+            created_at=now - timedelta(days=90),
+        )
+
+        # 6th expected (fallback without shared tags or authors): 0 + 0 + 2 downloads (~1.10) + fresh (1.0) = ~2.10
+        sixth_unrelated = _make_dataset(
+            owner,
+            title="Unrelated Chess Openings",
+            doi="10.1234/sixth",
+            tags="chess, boardgames",
+            authors=["Kasparov, Garry"],
+            created_at=now,
+        )
+        _seed_downloads(sixth_unrelated, 2)
+
+        # Unpublished draft despite identical tags and authors: must never appear
+        _make_dataset(
+            owner,
+            title="Unpublished Twin Draft",
+            doi=None,
+            tags="spl, uvl, variability",
+            authors=["Lovelace, Ada", "Turing, Alan"],
+            created_at=now,
+        )
+
+        service = DataSetService()
+
+        # Default limit (5) excludes the 6th lowest-scoring dataset, unpublished draft, and target itself
+        top_five = service.get_recommendations(target, now=now)
+        assert [d.id for d in top_five] == [
+            top_match.id,
+            second_match.id,
+            third_popular.id,
+            fourth_recent.id,
+            fifth_older.id,
+        ]
+        assert target.id not in [d.id for d in top_five]
+
+        # With limit=10, the unrelated published dataset appears in 6th place as fallback
+        all_ranked = service.get_recommendations(target, limit=10, now=now)
+        assert [d.id for d in all_ranked] == [
+            top_match.id,
+            second_match.id,
+            third_popular.id,
+            fourth_recent.id,
+            fifth_older.id,
+            sixth_unrelated.id,
+        ]
+
+        # Custom limit=2 returns only top 2
+        assert [d.id for d in service.get_recommendations(target, limit=2, now=now)] == [
+            top_match.id,
+            second_match.id,
+        ]
+
+
+def test_get_recommendations_handles_empty_or_non_positive_limits(test_app, clean_database):
+    with test_app.app_context():
+        owner = _make_user("alone@example.com")
+        only_dataset = _make_dataset(owner, title="Only One", doi="10.1234/only")
+
+        service = DataSetService()
+        assert service.get_recommendations(only_dataset) == []
+        assert service.get_recommendations(only_dataset, limit=0) == []
+        assert service.get_recommendations(None) == []

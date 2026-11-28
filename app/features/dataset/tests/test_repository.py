@@ -187,3 +187,42 @@ def test_total_dataset_views_tracks_created_records(test_app, clean_database):
         # Deleting a row lowers the count even though the highest id survives.
         repo.delete(records[0].id)
         assert repo.total_dataset_views() == 1
+
+
+def test_get_synchronized_excluding_omits_target_and_unpublished_datasets(test_app, clean_database):
+    with test_app.app_context():
+        owner = _make_user("owner@example.com")
+        target = _make_dataset(owner, title="Target", doi="10.1234/target")
+        published_a = _make_dataset(owner, title="Published A", doi="10.1234/a")
+        published_b = _make_dataset(owner, title="Published B", doi="10.1234/b")
+        _make_dataset(owner, title="Draft without DOI", doi=None)
+
+        candidates = DataSetRepository().get_synchronized_excluding(target.id)
+        assert {d.id for d in candidates} == {published_a.id, published_b.id}
+
+
+def test_count_downloads_by_dataset_ids_aggregates_per_dataset(test_app, clean_database):
+    with test_app.app_context():
+        owner = _make_user("owner@example.com")
+        ds1 = _make_dataset(owner, title="DS1", doi="10.1234/1")
+        ds2 = _make_dataset(owner, title="DS2", doi="10.1234/2")
+        ds3 = _make_dataset(owner, title="DS3", doi="10.1234/3")
+
+        repo = DSDownloadRecordRepository()
+        for cookie in ("c1", "c2", "c3"):
+            repo.create(
+                user_id=owner.id,
+                dataset_id=ds1.id,
+                download_date=datetime.now(timezone.utc),
+                download_cookie=cookie,
+            )
+        repo.create(
+            user_id=owner.id,
+            dataset_id=ds2.id,
+            download_date=datetime.now(timezone.utc),
+            download_cookie="c1",
+        )
+
+        counts = repo.count_downloads_by_dataset_ids([ds1.id, ds2.id, ds3.id])
+        assert counts == {ds1.id: 3, ds2.id: 1}
+        assert repo.count_downloads_by_dataset_ids([]) == {}

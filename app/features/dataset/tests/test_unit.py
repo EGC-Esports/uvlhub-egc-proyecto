@@ -6,13 +6,15 @@ instead of persisted rows.
 """
 
 import hashlib
+import math
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.features.dataset.forms import DataSetForm
 from app.features.dataset.models import BaseDataset, DataSet, PublicationType, UVLDataset
-from app.features.dataset.services import SizeService, calculate_checksum_and_size
+from app.features.dataset.services import DataSetService, SizeService, calculate_checksum_and_size
 
 pytestmark = pytest.mark.unit
 
@@ -127,3 +129,82 @@ def test_base_dataset_counts_and_sizes_come_from_files():
 def test_publication_type_none_is_the_documented_default_value():
     assert PublicationType.NONE.value == "none"
     assert PublicationType("article") is PublicationType.JOURNAL_ARTICLE
+
+
+def _stub_dataset(tags="", authors=None, created_at=None):
+    author_stubs = [
+        (
+            SimpleNamespace(name=a.get("name"), orcid=a.get("orcid"))
+            if isinstance(a, dict)
+            else SimpleNamespace(name=a, orcid=None)
+        )
+        for a in (authors or [])
+    ]
+    return SimpleNamespace(
+        created_at=created_at,
+        ds_meta_data=SimpleNamespace(tags=tags, authors=author_stubs),
+    )
+
+
+def test_recommendation_score_combines_tags_authors_downloads_and_recency():
+    now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+    target = _stub_dataset(
+        tags="Valorant, Esports, VCT",
+        authors=[{"name": "Payán, Pedro", "orcid": "0000-0001-0000-0001"}, {"name": "Jiménez, Raúl"}],
+        created_at=now,
+    )
+    candidate = _stub_dataset(
+        tags="valorant, vct, fps",
+        authors=[{"name": "P. Payán", "orcid": "0000-0001-0000-0001"}, {"name": "jiménez, raúl"}],
+        created_at=now - timedelta(days=30),
+    )
+
+    score = DataSetService.calculate_recommendation_score(
+        DataSetService,
+        target_dataset=target,
+        candidate_dataset=candidate,
+        downloads_count=10,
+        now=now,
+    )
+
+    # 2 shared tags (valorant, vct) * 3.0 = 6.0
+    # 2 shared authors (1 by ORCID, 1 by normalized name) * 2.0 = 4.0
+    # downloads: 1.0 * ln(1 + 10)
+    # recency (30 days old with 30-day half-life): 1.0 * (1 / (1 + 30/30)) = 0.5
+    expected = 2 * 3.0 + 2 * 2.0 + math.log1p(10) + 0.5
+    assert score == pytest.approx(expected)
+
+
+def test_recommendation_score_allows_candidates_without_shared_tags_or_authors_at_lower_priority():
+    now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+    target = _stub_dataset(tags="valorant,esports", authors=["Ada Lovelace"], created_at=now)
+    unrelated_recent = _stub_dataset(tags="chess", authors=["Garry Kasparov"], created_at=now)
+    unrelated_older = _stub_dataset(
+        tags=None,
+        authors=[],
+        created_at=now - timedelta(days=60),
+    )
+    related = _stub_dataset(tags="valorant", authors=[], created_at=now - timedelta(days=60))
+
+    score_unrelated_recent = DataSetService.calculate_recommendation_score(
+        DataSetService, target, unrelated_recent, downloads_count=5, now=now
+    )
+    score_unrelated_older = DataSetService.calculate_recommendation_score(
+        DataSetService, target, unrelated_older, downloads_count=0, now=now
+    )
+    score_related = DataSetService.calculate_recommendation_score(
+        DataSetService, target, related, downloads_count=0, now=now
+    )
+
+    assert score_unrelated_older > 0.0
+    assert score_unrelated_recent > score_unrelated_older
+    assert score_related > score_unrelated_recent
+
+
+def test_recommendation_recency_handles_naive_and_missing_dates():
+    now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+    naive_same_time = datetime(2026, 11, 28, 12, 0)
+
+    assert DataSetService._calculate_recency_factor(None, now=now) == 0.0
+    assert DataSetService._calculate_recency_factor(naive_same_time, now=now) == pytest.approx(1.0)
+    assert DataSetService._to_utc_timestamp(None) == 0.0
