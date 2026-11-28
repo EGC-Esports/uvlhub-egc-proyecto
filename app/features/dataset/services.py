@@ -1,8 +1,10 @@
 import hashlib
 import logging
+import math
 import os
 import shutil
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from flask import request
@@ -37,6 +39,13 @@ def calculate_checksum_and_size(file_path):
 
 
 class DataSetService(BaseService):
+    RECOMMENDATION_TAG_WEIGHT = 3.0
+    RECOMMENDATION_AUTHOR_WEIGHT = 2.0
+    RECOMMENDATION_DOWNLOAD_WEIGHT = 1.0
+    RECOMMENDATION_RECENCY_WEIGHT = 1.0
+    RECOMMENDATION_RECENCY_HALF_LIFE_DAYS = 30.0
+    DEFAULT_RECOMMENDATIONS_LIMIT = 5
+
     def __init__(self):
         super().__init__(DataSetRepository())
         self.feature_model_repository = FeatureModelRepository()
@@ -255,6 +264,128 @@ class DataSetService(BaseService):
     def get_uvlhub_doi(self, dataset: DataSet) -> str:
         domain = os.getenv("DOMAIN", "localhost")
         return f"http://{domain}/doi/{dataset.ds_meta_data.dataset_doi}"
+
+    @staticmethod
+    def _extract_normalized_tags(dataset: DataSet) -> set[str]:
+        meta = getattr(dataset, "ds_meta_data", None)
+        raw_tags = getattr(meta, "tags", None) or ""
+        return {tag.strip().lower() for tag in raw_tags.split(",") if tag.strip()}
+
+    @staticmethod
+    def _count_shared_authors(target_dataset: DataSet, candidate_dataset: DataSet) -> int:
+        target_meta = getattr(target_dataset, "ds_meta_data", None)
+        candidate_meta = getattr(candidate_dataset, "ds_meta_data", None)
+        target_authors = getattr(target_meta, "authors", None) or []
+        candidate_authors = getattr(candidate_meta, "authors", None) or []
+
+        target_names = {
+            author.name.strip().lower()
+            for author in target_authors
+            if getattr(author, "name", None) and author.name.strip()
+        }
+        target_orcids = {
+            author.orcid.strip().lower()
+            for author in target_authors
+            if getattr(author, "orcid", None) and author.orcid.strip()
+        }
+
+        matched_keys = set()
+        for author in candidate_authors:
+            name = (getattr(author, "name", None) or "").strip().lower()
+            orcid = (getattr(author, "orcid", None) or "").strip().lower()
+            if name and name in target_names:
+                matched_keys.add(f"name:{name}")
+            elif orcid and orcid in target_orcids:
+                matched_keys.add(f"orcid:{orcid}")
+        return len(matched_keys)
+
+    @staticmethod
+    def _ensure_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @classmethod
+    def _to_utc_timestamp(cls, dt: Optional[datetime]) -> float:
+        if dt is None:
+            return 0.0
+        return cls._ensure_utc(dt).timestamp()
+
+    @classmethod
+    def _calculate_recency_factor(cls, created_at: Optional[datetime], now: Optional[datetime] = None) -> float:
+        if created_at is None:
+            return 0.0
+        reference_now = cls._ensure_utc(now or datetime.now(timezone.utc))
+        created_utc = cls._ensure_utc(created_at)
+        age_days = max(0.0, (reference_now - created_utc).total_seconds() / 86400.0)
+        return 1.0 / (1.0 + age_days / cls.RECOMMENDATION_RECENCY_HALF_LIFE_DAYS)
+
+    def calculate_recommendation_score(
+        self,
+        target_dataset: DataSet,
+        candidate_dataset: DataSet,
+        downloads_count: int = 0,
+        now: Optional[datetime] = None,
+    ) -> float:
+        """Calcula el score de similitud de ``candidate_dataset`` respecto a ``target_dataset``.
+
+        Combina coincidencias de tags y autores con ponderación logarítmica por
+        descargas y decaimiento hiperbólico por antigüedad. Cualquier dataset
+        publicado es candidato aunque no comparta tags ni autores.
+        """
+        shared_tags = len(
+            self._extract_normalized_tags(target_dataset) & self._extract_normalized_tags(candidate_dataset)
+        )
+        shared_authors = self._count_shared_authors(target_dataset, candidate_dataset)
+        safe_downloads = max(0, int(downloads_count or 0))
+        recency_factor = self._calculate_recency_factor(getattr(candidate_dataset, "created_at", None), now=now)
+
+        return (
+            self.RECOMMENDATION_TAG_WEIGHT * shared_tags
+            + self.RECOMMENDATION_AUTHOR_WEIGHT * shared_authors
+            + self.RECOMMENDATION_DOWNLOAD_WEIGHT * math.log1p(safe_downloads)
+            + self.RECOMMENDATION_RECENCY_WEIGHT * recency_factor
+        )
+
+    def get_recommendations(
+        self,
+        dataset: DataSet,
+        limit: int = DEFAULT_RECOMMENDATIONS_LIMIT,
+        now: Optional[datetime] = None,
+    ) -> list[DataSet]:
+        """Devuelve hasta ``limit`` datasets publicados recomendados para ``dataset``.
+
+        Excluye siempre el dataset actual y cualquier dataset no publicado
+        (``dataset_doi is None``), ordenando de mayor a menor puntuación.
+        """
+        if dataset is None or limit <= 0:
+            return []
+
+        reference_now = now or datetime.now(timezone.utc)
+        candidates = self.repository.get_synchronized_excluding(dataset.id)
+        if not candidates:
+            return []
+
+        download_counts = self.dsdownloadrecord_repository.count_downloads_by_dataset_ids(
+            [candidate.id for candidate in candidates]
+        )
+
+        scored_candidates = [
+            (
+                self.calculate_recommendation_score(
+                    target_dataset=dataset,
+                    candidate_dataset=candidate,
+                    downloads_count=download_counts.get(candidate.id, 0),
+                    now=reference_now,
+                ),
+                self._to_utc_timestamp(getattr(candidate, "created_at", None)),
+                candidate.id or 0,
+                candidate,
+            )
+            for candidate in candidates
+        ]
+        scored_candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        return [item[3] for item in scored_candidates[:limit]]
 
 
 class AuthorService(BaseService):

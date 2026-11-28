@@ -4,7 +4,7 @@ from typing import Optional
 
 from flask_login import current_user
 from splent_framework.repositories.BaseRepository import BaseRepository
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 from app.features.dataset.models import Author, DataSet, DOIMapping, DSDownloadRecord, DSMetaData, DSViewRecord
 
@@ -25,6 +25,17 @@ class DSDownloadRecordRepository(BaseRepository):
 
     def find_by_user_dataset_cookie(self, user_id, dataset_id: int, cookie: str):
         return self.model.query.filter_by(user_id=user_id, dataset_id=dataset_id, download_cookie=cookie).first()
+
+    def count_downloads_by_dataset_ids(self, dataset_ids: list[int]) -> dict[int, int]:
+        if not dataset_ids:
+            return {}
+        rows = (
+            self.model.query.with_entities(self.model.dataset_id, func.count(self.model.id))
+            .filter(self.model.dataset_id.in_(dataset_ids))
+            .group_by(self.model.dataset_id)
+            .all()
+        )
+        return {dataset_id: int(count) for dataset_id, count in rows}
 
 
 class DSMetaDataRepository(BaseRepository):
@@ -107,6 +118,14 @@ class DataSetRepository(BaseRepository):
             .filter(DSMetaData.dataset_doi.isnot(None))
             .order_by(desc(self.model.id))
             .limit(5)
+            .all()
+        )
+
+    def get_synchronized_excluding(self, exclude_dataset_id: int) -> list[DataSet]:
+        return (
+            self.model.query.join(DSMetaData)
+            .filter(DataSet.id != exclude_dataset_id, DSMetaData.dataset_doi.isnot(None))
+            .order_by(self.model.created_at.desc(), self.model.id.desc())
             .all()
         )
 
