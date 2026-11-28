@@ -40,7 +40,7 @@ class User(db.Model, UserMixin):
     totp_secret = db.Column(EncryptedString(255), nullable=True)
     two_factor_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=false())
 
-    data_sets = db.relationship("UVLDataSet", backref="user", lazy=True)
+    data_sets = db.relationship("UVLDataset", backref="user", lazy=True)
     profile = db.relationship("UserProfile", backref="user", uselist=False)
     recovery_codes = db.relationship(
         "RecoveryCode",
