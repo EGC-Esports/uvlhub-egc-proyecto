@@ -12,7 +12,7 @@ from app.features.esports.models import CSV_COLUMNS, CSV_DELIMITER, Esports, Esp
 
 pytestmark = pytest.mark.unit
 
-EXAMPLE_CSV_PATH = Path(__file__).resolve().parents[4] / "valorant-data-example.csv"
+EXAMPLE_CSV_PATH = Path(__file__).resolve().parents[1] / "csv_examples" / "valorant-data-example.csv"
 
 
 def test_esports_feature_is_registered_in_splent_configuration():
@@ -170,7 +170,7 @@ def test_from_csv_row_converts_types_and_preserves_empty_cells_as_none():
 
 
 def test_valorant_example_csv_matches_model_schema_and_parses_all_rows():
-    assert EXAMPLE_CSV_PATH.exists(), "valorant-data-example.csv debe existir en la raíz del proyecto"
+    assert EXAMPLE_CSV_PATH.exists(), "valorant-data-example.csv debe existir en app/features/esports/csv_examples/"
 
     with EXAMPLE_CSV_PATH.open(encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.DictReader(csv_file, delimiter=CSV_DELIMITER)
