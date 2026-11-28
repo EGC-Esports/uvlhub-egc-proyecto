@@ -9,6 +9,7 @@ requires-python = ">=3.13"
 features = [
     "auth",
     "dataset",
+    "esports",
     "explore",
     "featuremodel",
     "flamapy",
